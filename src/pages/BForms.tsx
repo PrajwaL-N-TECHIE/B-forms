@@ -719,49 +719,52 @@ const BForms = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Main Navigation Segment */}
+          <div className="flex items-center bg-[#141224] p-1 rounded-xl border border-purple-500/30 shadow-sm">
+            <button
+              onClick={() => setView('dashboard')}
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                view === 'dashboard'
+                  ? 'bg-purple-600/35 text-white border border-purple-500/50 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Layers size={14} /> All Forms ({forms.length})
+            </button>
+
+            <button
+              onClick={() => {
+                if (!activeForm && forms.length > 0) {
+                  setActiveForm(forms[0]);
+                }
+                setView('responses');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                view === 'responses'
+                  ? 'bg-purple-600/35 text-white border border-purple-500/50 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+              title="View Responses & Visual Analytics"
+            >
+              <BarChart3 size={14} /> Analytics &amp; Responses
+            </button>
+          </div>
+
           <a
             href={getPublicFormUrl(OFFICIAL_FEEDBACK_FORM_ID)}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3 py-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 hover:text-white rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+            className="px-3 py-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/30 text-purple-200 hover:text-white rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
             title="Open Official B-Form Feedback"
           >
             <MessageSquare size={14} className="text-purple-400" />
-            <span className="hidden sm:inline">B-Form Feedback</span>
+            <span className="hidden sm:inline">Feedback</span>
           </a>
 
           <button
-            onClick={() => setView('dashboard')}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              view === 'dashboard'
-                ? 'bg-purple-600/25 text-purple-200 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
-                : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/10'
-            }`}
-          >
-            <Layers size={15} /> All Forms ({forms.length})
-          </button>
-
-          <button
-            onClick={() => {
-              if (!activeForm && forms.length > 0) {
-                setActiveForm(forms[0]);
-              }
-              setView('responses');
-            }}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              view === 'responses'
-                ? 'bg-purple-600/25 text-purple-200 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
-                : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/10'
-            }`}
-            title="View Responses & Visual Analytics"
-          >
-            <BarChart3 size={15} /> <span className="hidden sm:inline">Analytics &amp;</span> Responses
-          </button>
-
-          <button
             onClick={handleCreateNewForm}
-            className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] active:scale-95 cursor-pointer"
+            className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] active:scale-95 cursor-pointer"
           >
             <Plus size={16} /> Create Form
           </button>
@@ -772,7 +775,7 @@ const BForms = () => {
               setIsAuthenticated(false);
               toast.info('Signed out from Host Studio');
             }}
-            className="p-2 text-zinc-400 hover:text-red-400 rounded-xl hover:bg-white/5 border border-white/10 transition-colors"
+            className="p-2 text-zinc-400 hover:text-red-400 rounded-xl hover:bg-white/5 border border-white/10 transition-colors cursor-pointer"
             title="Sign Out"
           >
             <LogOut size={16} />
@@ -1496,8 +1499,8 @@ const BForms = () => {
         ) : (
           <main className="max-w-6xl mx-auto w-full relative z-10 flex-1 space-y-6">
             {/* Header & Export controls */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-purple-500/20">
-              <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-purple-500/20">
+              <div className="flex items-center gap-3 min-w-0">
                 <button
                   onClick={() => setView('dashboard')}
                   className="p-2.5 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 transition-all shrink-0 active:scale-95 cursor-pointer"
@@ -1505,72 +1508,94 @@ const BForms = () => {
                 >
                   <ArrowLeft size={18} />
                 </button>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-black text-white">{activeForm.title}</h2>
-                    <span className="px-2 py-0.5 rounded-full bg-purple-600/20 text-purple-300 text-[10px] font-bold uppercase tracking-wider border border-purple-500/30">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-lg sm:text-xl font-black text-white tracking-tight truncate max-w-lg">
+                      {activeForm.title}
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-600/20 text-purple-300 text-[10px] font-bold uppercase tracking-wider border border-purple-500/30 shrink-0">
                       Live Analytics
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-400">Real-time respondent statistics, answer breakdown & reports</p>
+                  <p className="text-xs text-zinc-400">Live responses, data distribution & export center</p>
                 </div>
+              </div>
 
+              {/* Structured Action Toolbar */}
+              <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
                 {forms.length > 1 && (
-                  <div className="flex items-center gap-2 ml-0 sm:ml-2 bg-[#141224] px-3 py-1.5 rounded-xl border border-purple-500/30">
-                    <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Switch:</span>
+                  <div className="flex items-center gap-1.5 bg-[#141224] px-2.5 py-1 rounded-xl border border-purple-500/30">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Form:</span>
                     <select
                       value={activeForm.id}
                       onChange={(e) => {
                         const found = forms.find(f => f.id === e.target.value);
                         if (found) setActiveForm(found);
                       }}
-                      className="bg-transparent text-purple-200 text-xs font-bold focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs truncate"
+                      className="bg-transparent text-purple-200 text-xs font-bold focus:outline-none cursor-pointer max-w-[130px] truncate"
                     >
                       {forms.map(f => (
                         <option key={f.id} value={f.id} className="bg-[#0C0C12] text-white">
-                          {f.title} ({f.responseCount || 0} responses)
+                          {f.title}
                         </option>
                       ))}
                     </select>
                   </div>
                 )}
-              </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => handleEditForm(activeForm)}
-                  className="px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                  title="Edit this form's title, description, or questions"
-                >
-                  <Edit size={14} /> Edit Form
-                </button>
-                <button
-                  onClick={() => copyShareLink(activeForm.id)}
-                  className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                >
-                  <Copy size={14} /> Copy Link
-                </button>
-                <button
-                  onClick={handleDownloadCSV}
-                  className="px-4 py-2 bg-purple-950/70 hover:bg-purple-900 text-purple-200 hover:text-white rounded-xl font-bold text-xs sm:text-sm border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
-                  title="Download CSV Spreadsheet"
-                >
-                  <Download size={15} /> Download CSV
-                </button>
-                <button
-                  onClick={handleDownloadPDF}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 shadow-[0_0_20px_rgba(168,85,247,0.35)] cursor-pointer active:scale-95"
-                  title="Download Styled PDF Report"
-                >
-                  <FileText size={15} /> Download PDF
-                </button>
+                {/* Form Management Pill */}
+                <div className="flex items-center bg-[#141224] p-1 rounded-xl border border-purple-500/30 shadow-sm">
+                  <button
+                    onClick={() => handleEditForm(activeForm)}
+                    className="px-2.5 sm:px-3 py-1.5 hover:bg-purple-900/50 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    title="Edit Form Questions & Banner"
+                  >
+                    <Edit size={13} /> <span>Edit</span>
+                  </button>
+                  <button
+                    onClick={() => copyShareLink(activeForm.id)}
+                    className="px-2.5 sm:px-3 py-1.5 hover:bg-purple-900/50 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    title="Copy Form Public Link"
+                  >
+                    <Copy size={13} /> <span>Share</span>
+                  </button>
+                  <a
+                    href={getPublicFormUrl(activeForm.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                    title="Open Form in New Tab"
+                  >
+                    <ExternalLink size={13} />
+                  </a>
+                </div>
+
+                {/* Export Data Pill */}
+                <div className="flex items-center bg-[#141224] p-1 rounded-xl border border-purple-500/30 shadow-sm">
+                  <button
+                    onClick={handleDownloadCSV}
+                    className="px-2.5 sm:px-3 py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 hover:text-white rounded-lg font-bold text-xs border border-purple-500/30 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                    title="Download CSV Spreadsheet"
+                  >
+                    <Download size={13} /> <span>CSV</span>
+                  </button>
+                  <button
+                    onClick={handleDownloadPDF}
+                    className="px-3 sm:px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-[0_0_15px_rgba(168,85,247,0.35)] cursor-pointer active:scale-95"
+                    title="Download PDF Report"
+                  >
+                    <FileText size={13} /> <span>PDF Report</span>
+                  </button>
+                </div>
+
+                {/* Delete Form */}
                 {activeForm.id !== OFFICIAL_FEEDBACK_FORM_ID && (
                   <button
                     onClick={() => deleteForm(activeForm.id)}
-                    className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl font-bold text-xs border border-red-500/30 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 transition-all cursor-pointer active:scale-95"
                     title="Delete this form"
                   >
-                    <Trash2 size={14} /> Delete Form
+                    <Trash2 size={15} />
                   </button>
                 )}
               </div>
