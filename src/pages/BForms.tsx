@@ -4,7 +4,8 @@ import {
   FileText, Plus, Trash2, Copy, Check, ExternalLink, Download,
   Sparkles, Image as ImageIcon, ArrowLeft, Star, CheckSquare,
   CircleDot, AlignLeft, Type, BarChart3, Users, Clock, Shield,
-  Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare
+  Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare,
+  Edit
 } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import {
@@ -146,6 +147,7 @@ const BForms = () => {
     }
   ]);
   const [savingForm, setSavingForm] = useState<boolean>(false);
+  const [editingFormId, setEditingFormId] = useState<string | null>(null);
 
   // Share Modal state
   const [shareModalForm, setShareModalForm] = useState<BForm | null>(null);
@@ -382,7 +384,61 @@ const BForms = () => {
     }));
   };
 
-  // Save / Publish Form
+  // Start editing an existing form
+  const handleEditForm = (form: BForm) => {
+    setEditingFormId(form.id);
+    setFormTitle(form.title || 'Untitled Form');
+    setFormDescription(form.description || '');
+    setCoverImage(form.coverImage || '');
+    setQuestions(
+      form.questions && form.questions.length > 0
+        ? JSON.parse(JSON.stringify(form.questions))
+        : [{ id: `q_${Date.now()}`, title: 'Untitled Question', type: 'short_text', required: false }]
+    );
+    setView('create');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Start creating a brand new form
+  const handleCreateNewForm = () => {
+    setEditingFormId(null);
+    setFormTitle('Buildicy Feedback Survey');
+    setFormDescription('Thank you for participating! Please take a few moments to share your candid feedback.');
+    setCoverImage('');
+    setQuestions([
+      {
+        id: 'q_1',
+        title: 'How would you rate your overall experience with Buildicy?',
+        type: 'rating',
+        required: true,
+        ratingMax: 5
+      },
+      {
+        id: 'q_2',
+        title: 'What was your favorite aspect of the session?',
+        type: 'radio',
+        required: true,
+        options: ['Interactive Hands-on Practice', 'Clear Explanations', 'Buiz Arena Quiz Competitions', 'Mentorship & Support']
+      },
+      {
+        id: 'q_3',
+        title: 'Which topics would you like to explore next?',
+        type: 'checkbox',
+        required: false,
+        options: ['Full Stack AI Applications', 'Agentic Workflows & LLMs', 'Cloud & DevOps Architecture', 'UI/UX & Product Design']
+      },
+      {
+        id: 'q_4',
+        title: 'Any additional suggestions or comments for improvement?',
+        type: 'paragraph',
+        required: false
+      }
+    ]);
+    setView('create');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Save / Publish / Update Form
   const saveForm = async () => {
     if (!formTitle.trim()) {
       toast.error('Please enter a Form Title!');
@@ -394,7 +450,10 @@ const BForms = () => {
     }
 
     setSavingForm(true);
-    const formId = `bf_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const formId = editingFormId || `bf_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+    const existingForm = forms.find(f => f.id === formId);
+    const currentResponseCount = existingForm?.responseCount ?? activeForm?.responseCount ?? 0;
 
     const newForm: BForm = {
       id: formId,
@@ -402,16 +461,15 @@ const BForms = () => {
       description: formDescription.trim(),
       coverImage: coverImage || '',
       questions: questions,
-      responseCount: 0,
+      responseCount: currentResponseCount,
       status: 'active'
     };
 
     try {
       await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), {
         ...newForm,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+        ...(editingFormId ? { updatedAt: serverTimestamp() } : { createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+      }, { merge: true });
 
       const publishedUrl = getPublicFormUrl(formId);
       fallbackCopyText(publishedUrl);
@@ -421,11 +479,12 @@ const BForms = () => {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 3000);
 
-      toast.success('🎉 B-Form published successfully!', {
+      toast.success(editingFormId ? '🎉 B-Form updated successfully!' : '🎉 B-Form published successfully!', {
         description: publishedUrl
       });
       setSavingForm(false);
       setShareModalForm(newForm);
+      setEditingFormId(null);
       setView('dashboard');
     } catch (err: any) {
       console.error('Error saving form:', err);
@@ -590,12 +649,7 @@ const BForms = () => {
           </button>
 
           <button
-            onClick={() => {
-              setView('create');
-              setFormTitle('Buildicy Feedback Survey');
-              setFormDescription('Thank you for participating! Please take a few moments to share your candid feedback.');
-              setCoverImage('');
-            }}
+            onClick={handleCreateNewForm}
             className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] active:scale-95 cursor-pointer"
           >
             <Plus size={16} /> Create Form
@@ -702,12 +756,7 @@ const BForms = () => {
                 Create your first Google Forms-style survey with cover banner, customizable questions, and one-click shareable links!
               </p>
               <button
-                onClick={() => {
-                  setView('create');
-                  setFormTitle('Buildicy Feedback Survey');
-                  setFormDescription('Thank you for participating! Please take a few moments to share your candid feedback.');
-                  setCoverImage('');
-                }}
+                onClick={handleCreateNewForm}
                 className="px-6 py-3.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-sm shadow-[0_0_25px_rgba(168,85,247,0.45)] hover:shadow-[0_0_35px_rgba(168,85,247,0.65)] transition-all flex items-center gap-2 mx-auto active:scale-95 cursor-pointer"
               >
                 <Plus size={18} /> Create New Feedback Form
@@ -798,11 +847,18 @@ const BForms = () => {
 
                       <div className="flex items-center gap-1.5">
                         <button
+                          onClick={() => handleEditForm(form)}
+                          className="px-2.5 py-1.5 bg-purple-900/40 hover:bg-purple-800/60 border border-purple-500/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                          title="Edit Form"
+                        >
+                          <Edit size={13} /> Edit
+                        </button>
+                        <button
                           onClick={() => {
                             setActiveForm(form);
                             setView('responses');
                           }}
-                          className="px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm"
+                          className="px-2.5 sm:px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm cursor-pointer"
                         >
                           <BarChart3 size={13} /> Responses
                         </button>
@@ -832,18 +888,26 @@ const BForms = () => {
         <main className="max-w-4xl mx-auto w-full relative z-10 flex-1 space-y-6">
           <div className="flex items-center justify-between gap-4">
             <button
-              onClick={() => setView('dashboard')}
-              className="px-3.5 py-2 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95"
+              onClick={() => {
+                setEditingFormId(null);
+                setView('dashboard');
+              }}
+              className="px-3.5 py-2 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
             >
               <ArrowLeft size={16} /> Back to Dashboard
             </button>
             <div className="flex items-center gap-2">
+              {editingFormId && (
+                <span className="px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <Edit size={13} /> Editing Form
+                </span>
+              )}
               <button
                 onClick={saveForm}
                 disabled={savingForm}
                 className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
               >
-                <Save size={16} /> {savingForm ? 'Publishing...' : 'Publish & Get Link'}
+                <Save size={16} /> {savingForm ? (editingFormId ? 'Saving...' : 'Publishing...') : editingFormId ? 'Save & Update Form' : 'Publish & Get Link'}
               </button>
             </div>
           </div>
@@ -1136,8 +1200,15 @@ const BForms = () => {
 
             <div className="flex items-center gap-2.5 flex-wrap">
               <button
+                onClick={() => handleEditForm(activeForm)}
+                className="px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="Edit this form's title, description, or questions"
+              >
+                <Edit size={14} /> Edit Form
+              </button>
+              <button
                 onClick={() => copyShareLink(activeForm.id)}
-                className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm"
+                className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 <Copy size={14} /> Copy Form Link
               </button>
