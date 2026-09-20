@@ -5,7 +5,7 @@ import {
   Sparkles, Image as ImageIcon, ArrowLeft, Star, CheckSquare,
   CircleDot, AlignLeft, Type, BarChart3, Users, Clock, Shield,
   Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare,
-  Edit
+  Edit, ChevronUp, ChevronDown, ArrowRight, Upload
 } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import {
@@ -259,6 +259,13 @@ const BForms = () => {
     return () => unsubscribe();
   }, [activeForm, view]);
 
+  // Auto-select first form if responses view opened without an activeForm
+  useEffect(() => {
+    if (view === 'responses' && !activeForm && forms.length > 0) {
+      setActiveForm(forms[0]);
+    }
+  }, [view, activeForm, forms]);
+
   // Handle Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -324,11 +331,18 @@ const BForms = () => {
   };
 
   const removeQuestion = (id: string) => {
-    if (questions.length <= 1) {
-      toast.error('A form must have at least one question!');
-      return;
-    }
     setQuestions(questions.filter(q => q.id !== id));
+    toast.success('Question deleted');
+  };
+
+  const moveQuestion = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= questions.length) return;
+    const nextList = [...questions];
+    const temp = nextList[index];
+    nextList[index] = nextList[targetIndex];
+    nextList[targetIndex] = temp;
+    setQuestions(nextList);
   };
 
   const duplicateQuestion = (index: number) => {
@@ -495,18 +509,98 @@ const BForms = () => {
 
   // Delete Form
   const deleteForm = async (formId: string) => {
-    if (!confirm('Are you sure you want to delete this form and all its responses?')) return;
+    if (formId === OFFICIAL_FEEDBACK_FORM_ID) {
+      toast.error('The official feedback form is protected and cannot be deleted.');
+      return;
+    }
+    const targetForm = forms.find(f => f.id === formId) || activeForm;
+    const formName = targetForm ? `"${targetForm.title}"` : 'this form';
+    if (!window.confirm(`⚠️ Are you sure you want to permanently delete ${formName} and all its collected responses? This action cannot be undone.`)) {
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId));
+      
+      // Clean up responses associated with this form
+      try {
+        const respQuery = query(
+          collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
+          where('formId', '==', formId)
+        );
+        const respSnap = await getDocs(respQuery);
+        respSnap.forEach(d => {
+          deleteDoc(d.ref).catch(() => {});
+        });
+      } catch (cleanErr) {
+        console.warn('Could not batch delete responses:', cleanErr);
+      }
+
       toast.success('Form deleted successfully.');
+      setForms(prev => prev.filter(f => f.id !== formId));
       if (activeForm?.id === formId) {
         setActiveForm(null);
+        setView('dashboard');
+      }
+      if (editingFormId === formId) {
+        setEditingFormId(null);
         setView('dashboard');
       }
     } catch (err) {
       console.error('Delete form error:', err);
       toast.error('Failed to delete form.');
     }
+  };
+
+  // Quick download from card (CSV or PDF)
+  const handleQuickDownload = async (form: BForm, format: 'csv' | 'pdf') => {
+    toast.info(`Preparing ${format.toUpperCase()} export for "${form.title}"...`);
+    try {
+      const q = query(
+        collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
+        where('formId', '==', form.id)
+      );
+      const snap = await getDocs(q);
+      const list: BFormResponse[] = snap.docs.map(d => ({
+        id: d.id,
+        ...(d.data() as any)
+      }));
+      if (list.length === 0) {
+        toast.warning(`No responses submitted yet for "${form.title}".`);
+        return;
+      }
+      if (format === 'csv') {
+        downloadFormResponsesCSV(form, list);
+        toast.success(`📥 CSV Report downloaded for "${form.title}"!`);
+      } else {
+        downloadFormResponsesPDF(form, list);
+        toast.success(`📄 PDF Report downloaded for "${form.title}"!`);
+      }
+    } catch (err) {
+      console.error('Quick download failed:', err);
+      toast.error('Failed to download report.');
+    }
+  };
+
+  // Download CSV from Analytics View
+  const handleDownloadCSV = () => {
+    if (!activeForm) return;
+    if (responses.length === 0) {
+      toast.info(`No responses collected yet for "${activeForm.title}". Share the form link to start collecting submissions!`);
+      return;
+    }
+    downloadFormResponsesCSV(activeForm, responses);
+    toast.success(`📥 CSV report downloaded for "${activeForm.title}"!`);
+  };
+
+  // Download PDF from Analytics View
+  const handleDownloadPDF = () => {
+    if (!activeForm) return;
+    if (responses.length === 0) {
+      toast.info(`No responses collected yet for "${activeForm.title}". Share the form link to start collecting submissions!`);
+      return;
+    }
+    downloadFormResponsesPDF(activeForm, responses);
+    toast.success(`📄 PDF report downloaded for "${activeForm.title}"!`);
   };
 
   // Copy Form Share Link
@@ -639,13 +733,30 @@ const BForms = () => {
 
           <button
             onClick={() => setView('dashboard')}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
               view === 'dashboard'
                 ? 'bg-purple-600/25 text-purple-200 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
                 : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/10'
             }`}
           >
             <Layers size={15} /> All Forms ({forms.length})
+          </button>
+
+          <button
+            onClick={() => {
+              if (!activeForm && forms.length > 0) {
+                setActiveForm(forms[0]);
+              }
+              setView('responses');
+            }}
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              view === 'responses'
+                ? 'bg-purple-600/25 text-purple-200 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
+                : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/10'
+            }`}
+            title="View Responses & Visual Analytics"
+          >
+            <BarChart3 size={15} /> <span className="hidden sm:inline">Analytics &amp;</span> Responses
           </button>
 
           <button
@@ -873,6 +984,27 @@ const BForms = () => {
                         )}
                       </div>
                     </div>
+
+                    {/* Quick Export Row */}
+                    <div className="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between text-xs">
+                      <span className="text-[11px] font-mono text-zinc-500">Download Data:</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleQuickDownload(form, 'csv')}
+                          className="px-2 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-md text-[11px] font-semibold border border-white/10 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Download Responses CSV"
+                        >
+                          <Download size={11} /> CSV
+                        </button>
+                        <button
+                          onClick={() => handleQuickDownload(form, 'pdf')}
+                          className="px-2 py-1 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-md text-[11px] font-semibold border border-purple-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Download Responses PDF"
+                        >
+                          <FileText size={11} /> PDF
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -902,6 +1034,16 @@ const BForms = () => {
                   <Edit size={13} /> Editing Form
                 </span>
               )}
+              {editingFormId && editingFormId !== OFFICIAL_FEEDBACK_FORM_ID && (
+                <button
+                  type="button"
+                  onClick={() => deleteForm(editingFormId)}
+                  className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  title="Delete this form permanently"
+                >
+                  <Trash2 size={14} /> Delete Form
+                </button>
+              )}
               <button
                 onClick={saveForm}
                 disabled={savingForm}
@@ -924,7 +1066,7 @@ const BForms = () => {
                   <button
                     type="button"
                     onClick={() => setCoverImage('')}
-                    className="text-red-400 hover:text-red-300 text-xs font-semibold lowercase flex items-center gap-1"
+                    className="text-red-400 hover:text-red-300 text-xs font-semibold lowercase flex items-center gap-1 cursor-pointer"
                   >
                     <X size={13} /> Remove banner
                   </button>
@@ -932,22 +1074,63 @@ const BForms = () => {
               </label>
 
               {coverImage ? (
-                <div className="relative h-44 rounded-2xl overflow-hidden border border-purple-500/30 group">
-                  <img src={coverImage} alt="Cover Preview" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <label className="cursor-pointer px-4 py-2 bg-black/70 hover:bg-black/90 text-white rounded-xl text-xs font-bold border border-white/20">
-                      Change Image
+                <div className="space-y-3">
+                  <div className="relative h-44 rounded-2xl overflow-hidden border border-purple-500/30 group">
+                    <img src={coverImage} alt="Cover Preview" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                      <label className="cursor-pointer px-4 py-2 bg-black/80 hover:bg-black text-white rounded-xl text-xs font-bold border border-white/20 transition-all flex items-center gap-1.5">
+                        <ImageIcon size={14} /> Change Image File
+                        <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setCoverImage('')}
+                        className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 size={14} /> Remove Banner
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="cursor-pointer px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl text-xs font-bold border border-purple-500/40 transition-all flex items-center gap-1.5">
+                      <Upload size={14} /> Replace File
                       <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                     </label>
+                    <input
+                      type="url"
+                      placeholder="Or update with image URL (https://...)..."
+                      value={coverImage.startsWith('data:') ? '' : coverImage}
+                      onChange={(e) => setCoverImage(e.target.value)}
+                      className="flex-1 min-w-[200px] bg-[#161424] border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCoverImage('')}
+                      className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold border border-red-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
                   </div>
                 </div>
               ) : (
-                <label className="cursor-pointer block border-2 border-dashed border-purple-500/30 hover:border-purple-500/70 rounded-2xl p-6 text-center bg-[#141224]/50 hover:bg-[#141224] transition-all group">
-                  <ImageIcon className="mx-auto text-purple-400/60 group-hover:text-purple-400 group-hover:scale-110 transition-all mb-2" size={32} />
-                  <p className="text-xs sm:text-sm font-bold text-purple-200">Click to upload form cover banner</p>
-                  <p className="text-[11px] text-zinc-500 mt-1">PNG, JPG, WebP up to 2MB (recommended ratio: 16:9 or 3:1)</p>
-                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                </label>
+                <div className="space-y-2">
+                  <label className="cursor-pointer block border-2 border-dashed border-purple-500/30 hover:border-purple-500/70 rounded-2xl p-6 text-center bg-[#141224]/50 hover:bg-[#141224] transition-all group">
+                    <ImageIcon className="mx-auto text-purple-400/60 group-hover:text-purple-400 group-hover:scale-110 transition-all mb-2" size={32} />
+                    <p className="text-xs sm:text-sm font-bold text-purple-200">Click to upload form cover banner</p>
+                    <p className="text-[11px] text-zinc-500 mt-1">PNG, JPG, WebP up to 2MB (recommended ratio: 16:9 or 3:1)</p>
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      placeholder="Or paste an image URL directly (e.g. https://...)..."
+                      value={coverImage}
+                      onChange={(e) => setCoverImage(e.target.value)}
+                      className="flex-1 bg-[#161424] border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1112,11 +1295,29 @@ const BForms = () => {
                     <span>{q.required ? 'Required *' : 'Optional'}</span>
                   </button>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => moveQuestion(qIdx, 'up')}
+                      disabled={qIdx === 0}
+                      className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg transition-colors disabled:opacity-20 cursor-pointer"
+                      title="Move Question Up"
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveQuestion(qIdx, 'down')}
+                      disabled={qIdx === questions.length - 1}
+                      className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg transition-colors disabled:opacity-20 cursor-pointer"
+                      title="Move Question Down"
+                    >
+                      <ChevronDown size={14} />
+                    </button>
                     <button
                       type="button"
                       onClick={() => duplicateQuestion(qIdx)}
-                      className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                      className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg transition-colors flex items-center gap-1 text-xs cursor-pointer"
                       title="Duplicate Question"
                     >
                       <Copy size={13} /> Duplicate
@@ -1124,7 +1325,7 @@ const BForms = () => {
                     <button
                       type="button"
                       onClick={() => removeQuestion(q.id)}
-                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg transition-colors cursor-pointer"
                       title="Delete Question"
                     >
                       <Trash2 size={15} />
@@ -1173,6 +1374,27 @@ const BForms = () => {
                 <Star size={13} /> Star Rating
               </button>
             </div>
+
+            {/* Danger Zone: Delete Form when in Edit Mode */}
+            {editingFormId && editingFormId !== OFFICIAL_FEEDBACK_FORM_ID && (
+              <div className="mt-8 p-5 rounded-2xl bg-red-950/20 border border-red-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-bold text-red-300 flex items-center gap-2">
+                    <AlertCircle size={16} /> Danger Zone: Delete Form
+                  </h4>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Permanently delete this form and all its collected responses. This action cannot be undone.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => deleteForm(editingFormId)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+                >
+                  <Trash2 size={14} /> Delete Form Permanently
+                </button>
+              </div>
+            )}
           </div>
         </main>
       )}
@@ -1180,54 +1402,179 @@ const BForms = () => {
       {/* -------------------------------------------------------------------- */}
       {/* VIEW: RESPONSES & ANALYTICS CENTER */}
       {/* -------------------------------------------------------------------- */}
-      {view === 'responses' && activeForm && (
-        <main className="max-w-6xl mx-auto w-full relative z-10 flex-1 space-y-6">
-          {/* Header & Export controls */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-purple-500/20">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setView('dashboard')}
-                className="p-2.5 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 transition-all shrink-0 active:scale-95"
-                title="Back to Forms"
-              >
-                <ArrowLeft size={18} />
-              </button>
-              <div>
-                <h2 className="text-xl font-black text-white">{activeForm.title}</h2>
-                <p className="text-xs text-zinc-400">Live responses & export center</p>
+      {view === 'responses' && (
+        !activeForm ? (
+          forms.length === 0 ? (
+            <main className="max-w-4xl mx-auto w-full relative z-10 flex-1 py-16 text-center">
+              <div className="bg-[#0C0C12]/80 border border-purple-500/30 rounded-3xl p-8 sm:p-12 backdrop-blur-xl">
+                <BarChart3 className="mx-auto text-purple-400 mb-4" size={48} />
+                <h2 className="text-xl font-black text-white mb-2">No Forms Created Yet</h2>
+                <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto mb-6">
+                  Create your first feedback form to begin collecting real-time submissions and download CSV/PDF reports!
+                </p>
+                <button
+                  onClick={handleCreateNewForm}
+                  className="px-6 py-3.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-sm shadow-[0_0_25px_rgba(168,85,247,0.45)] transition-all flex items-center gap-2 mx-auto active:scale-95 cursor-pointer"
+                >
+                  <Plus size={18} /> Create New Feedback Form
+                </button>
+              </div>
+            </main>
+          ) : (
+            <main className="max-w-6xl mx-auto w-full relative z-10 flex-1 space-y-6">
+              <div className="flex items-center justify-between gap-4 pb-4 border-b border-purple-500/20">
+                <div>
+                  <h2 className="text-xl font-black text-white">Select a Form for Analytics</h2>
+                  <p className="text-xs text-zinc-400">Choose any feedback form below to inspect submissions and export reports</p>
+                </div>
+                <button
+                  onClick={() => setView('dashboard')}
+                  className="px-3.5 py-2 bg-purple-950/40 hover:bg-purple-900 text-purple-300 rounded-xl border border-purple-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft size={16} /> Back to Dashboard
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {forms.map(form => (
+                  <div
+                    key={form.id}
+                    onClick={() => setActiveForm(form)}
+                    className="bg-[#0C0C12]/80 border border-purple-500/30 hover:border-purple-500/70 rounded-2xl p-5 backdrop-blur-xl transition-all shadow-md hover:shadow-[0_0_20px_rgba(168,85,247,0.25)] cursor-pointer group flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="px-2.5 py-0.5 rounded-full bg-purple-600/20 text-purple-300 text-[10px] font-bold uppercase tracking-wider border border-purple-500/30">
+                          {form.status || 'Active'}
+                        </span>
+                        <span className="text-xs font-mono font-bold text-yellow-400 flex items-center gap-1">
+                          <Users size={12} /> {form.responseCount || 0} Responses
+                        </span>
+                      </div>
+                      <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-1 mb-1">
+                        {form.title}
+                      </h3>
+                      <p className="text-xs text-zinc-400 line-clamp-2 mb-4">
+                        {form.description || 'No description provided.'}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2">
+                      <span className="text-xs text-purple-400 font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
+                        View Analytics <ArrowRight size={14} />
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickDownload(form, 'csv');
+                          }}
+                          className="px-2 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 rounded text-[11px] font-semibold border border-white/10 transition-colors"
+                          title="Download CSV"
+                        >
+                          CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickDownload(form, 'pdf');
+                          }}
+                          className="px-2 py-1 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 rounded text-[11px] font-semibold border border-purple-500/30 transition-colors"
+                          title="Download PDF"
+                        >
+                          PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </main>
+          )
+        ) : (
+          <main className="max-w-6xl mx-auto w-full relative z-10 flex-1 space-y-6">
+            {/* Header & Export controls */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-purple-500/20">
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => setView('dashboard')}
+                  className="p-2.5 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 transition-all shrink-0 active:scale-95 cursor-pointer"
+                  title="Back to Forms"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-black text-white">{activeForm.title}</h2>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-600/20 text-purple-300 text-[10px] font-bold uppercase tracking-wider border border-purple-500/30">
+                      Live Analytics
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400">Real-time respondent statistics, answer breakdown & reports</p>
+                </div>
+
+                {forms.length > 1 && (
+                  <div className="flex items-center gap-2 ml-0 sm:ml-2 bg-[#141224] px-3 py-1.5 rounded-xl border border-purple-500/30">
+                    <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Switch:</span>
+                    <select
+                      value={activeForm.id}
+                      onChange={(e) => {
+                        const found = forms.find(f => f.id === e.target.value);
+                        if (found) setActiveForm(found);
+                      }}
+                      className="bg-transparent text-purple-200 text-xs font-bold focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs truncate"
+                    >
+                      {forms.map(f => (
+                        <option key={f.id} value={f.id} className="bg-[#0C0C12] text-white">
+                          {f.title} ({f.responseCount || 0} responses)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => handleEditForm(activeForm)}
+                  className="px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Edit this form's title, description, or questions"
+                >
+                  <Edit size={14} /> Edit Form
+                </button>
+                <button
+                  onClick={() => copyShareLink(activeForm.id)}
+                  className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Copy size={14} /> Copy Link
+                </button>
+                <button
+                  onClick={handleDownloadCSV}
+                  className="px-4 py-2 bg-purple-950/70 hover:bg-purple-900 text-purple-200 hover:text-white rounded-xl font-bold text-xs sm:text-sm border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                  title="Download CSV Spreadsheet"
+                >
+                  <Download size={15} /> Download CSV
+                </button>
+                <button
+                  onClick={handleDownloadPDF}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 shadow-[0_0_20px_rgba(168,85,247,0.35)] cursor-pointer active:scale-95"
+                  title="Download Styled PDF Report"
+                >
+                  <FileText size={15} /> Download PDF
+                </button>
+                {activeForm.id !== OFFICIAL_FEEDBACK_FORM_ID && (
+                  <button
+                    onClick={() => deleteForm(activeForm.id)}
+                    className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl font-bold text-xs border border-red-500/30 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    title="Delete this form"
+                  >
+                    <Trash2 size={14} /> Delete Form
+                  </button>
+                )}
               </div>
             </div>
-
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <button
-                onClick={() => handleEditForm(activeForm)}
-                className="px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                title="Edit this form's title, description, or questions"
-              >
-                <Edit size={14} /> Edit Form
-              </button>
-              <button
-                onClick={() => copyShareLink(activeForm.id)}
-                className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                <Copy size={14} /> Copy Form Link
-              </button>
-              <button
-                onClick={() => downloadFormResponsesCSV(activeForm, responses)}
-                disabled={responses.length === 0}
-                className="px-4 py-2 bg-purple-950/70 hover:bg-purple-900 text-purple-200 hover:text-white rounded-xl font-bold text-xs sm:text-sm border border-purple-500/40 transition-all flex items-center gap-1.5 disabled:opacity-40 shadow-sm"
-              >
-                <Download size={15} /> Download CSV
-              </button>
-              <button
-                onClick={() => downloadFormResponsesPDF(activeForm, responses)}
-                disabled={responses.length === 0}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 disabled:opacity-40 shadow-[0_0_20px_rgba(168,85,247,0.35)] cursor-pointer active:scale-95"
-              >
-                <FileText size={15} /> Download PDF
-              </button>
-            </div>
-          </div>
 
           {/* Metric KPI cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1300,12 +1647,22 @@ const BForms = () => {
               <AlertCircle className="mx-auto text-purple-400/50 mb-3" size={32} />
               <p className="text-base font-bold text-white mb-1">No responses collected yet</p>
               <p className="text-xs text-zinc-400 mb-4">Share your form link with students or attendees to start gathering feedback!</p>
-              <button
-                onClick={() => copyShareLink(activeForm.id)}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-md"
-              >
-                <Copy size={13} /> Copy Share Link
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => copyShareLink(activeForm.id)}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Copy size={13} /> Copy Share Link
+                </button>
+                <a
+                  href={getPublicFormUrl(activeForm.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 border border-white/10"
+                >
+                  <ExternalLink size={13} /> Open & Test Form
+                </a>
+              </div>
             </div>
           ) : responsesViewTab === 'summary' ? (
             /* Summary Breakdown */
@@ -1445,6 +1802,7 @@ const BForms = () => {
             </div>
           )}
         </main>
+        )
       )}
     </div>
   );
