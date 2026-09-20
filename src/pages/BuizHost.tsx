@@ -748,7 +748,7 @@ const BuizHost = () => {
                         <div>
                           <h3 className="font-bold text-white text-base">{hist.quizName}</h3>
                           <p className="text-xs text-zinc-400 font-mono mt-0.5">
-                            {new Date(hist.date).toLocaleString()} • {hist.totalPlayers || 0} Players • {hist.totalPossiblePoints ? `${hist.totalPossiblePoints.toLocaleString()} Max Pts` : `${(hist.questionsCount || hist.questions?.length || 0) * 1000} Max Pts`}
+                            {new Date(hist.date).toLocaleString()} • {hist.totalPlayers || (hist.players ? hist.players.length : 0)} Players • {hist.totalPossiblePoints ? `${hist.totalPossiblePoints.toLocaleString()} Max Pts` : `${Math.max(10, hist.questionsCount || (hist.questions ? hist.questions.length : 10)) * 1000} Max Pts`}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -775,17 +775,47 @@ const BuizHost = () => {
                           </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {hist.winners && hist.winners.map((w: any, idx: number) => (
-                          <div key={idx} className="bg-black/30 border border-white/10 px-3 py-1 rounded-lg flex items-center gap-2 text-xs">
-                            <span className={idx === 0 ? 'text-yellow-400 font-bold' : idx === 1 ? 'text-zinc-300 font-bold' : 'text-orange-400 font-bold'}>
-                              #{idx + 1}
-                            </span>
-                            <span className="text-white font-medium">{w.name}</span>
-                            <span className="text-purple-400 font-mono font-bold">{w.score}</span>
+                      {(() => {
+                        const playerList = (hist.players && hist.players.length > 0)
+                          ? hist.players
+                          : (hist.winners || []);
+                        return (
+                          <div className="flex items-center gap-2 flex-wrap pt-1">
+                            {playerList.map((p: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className={`border px-2.5 py-1 rounded-lg flex items-center gap-2 text-xs transition-all ${
+                                  idx === 0
+                                    ? 'bg-yellow-500/10 border-yellow-500/30'
+                                    : idx === 1
+                                    ? 'bg-zinc-400/10 border-zinc-400/20'
+                                    : idx === 2
+                                    ? 'bg-orange-500/10 border-orange-500/20'
+                                    : 'bg-black/30 border-white/10'
+                                }`}
+                              >
+                                <span
+                                  className={`font-black ${
+                                    idx === 0
+                                      ? 'text-yellow-400'
+                                      : idx === 1
+                                      ? 'text-zinc-300'
+                                      : idx === 2
+                                      ? 'text-orange-400'
+                                      : 'text-zinc-500'
+                                  }`}
+                                >
+                                  #{idx + 1}
+                                </span>
+                                <span className="text-white font-medium">{p.name}</span>
+                                <span className="text-purple-400 font-mono font-bold">
+                                  {(p.score || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -1341,9 +1371,9 @@ const BuizHost = () => {
                 <p className="text-xs text-zinc-500 mt-0.5">{totalPossiblePoints > 0 ? `${Math.round((avgScore / totalPossiblePoints) * 100)}% of Max` : ''}</p>
               </div>
               <div className="bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5">
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Class Accuracy</p>
-                <p className="text-lg md:text-xl font-black text-green-400">{avgAccuracy}%</p>
-                <p className="text-xs text-zinc-500 mt-0.5">Average Correct Rate</p>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Top Score</p>
+                <p className="text-lg md:text-xl font-black text-yellow-400">{(top3[0]?.score || 0).toLocaleString()}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Arena High Score</p>
               </div>
             </div>
 
@@ -1409,7 +1439,7 @@ const BuizHost = () => {
                           </span>
                           <div>
                             <p className="text-white font-bold text-base leading-tight">{p.name}</p>
-                            <p className="text-xs text-zinc-500 font-mono mt-0.5">{p.streak ? `${p.streak} streak` : '0 streak'}</p>
+                            <p className="text-xs text-zinc-500 font-mono mt-0.5">Rank #{rank}</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -1418,15 +1448,9 @@ const BuizHost = () => {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-xs">
-                        <div className="flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
-                          <span className="text-zinc-400">Accuracy:</span>
-                          <span className={`font-bold ${stats.accuracy >= 80 ? 'text-green-400' : stats.accuracy >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{stats.accuracy}%</span>
-                        </div>
-                        <div className="flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
-                          <span className="text-zinc-400">Correct:</span>
-                          <span className="text-white font-bold">{stats.correctCount} / {stats.totalQuestions}</span>
-                        </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs bg-white/5 px-3 py-2 rounded-xl">
+                        <span className="text-zinc-400 font-medium">Correct Answers:</span>
+                        <span className="text-white font-bold font-mono text-sm">{stats.correctCount} / {stats.totalQuestions}</span>
                       </div>
 
                       {showQuestionMatrix && (
@@ -1460,9 +1484,7 @@ const BuizHost = () => {
                       <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs w-16">Rank</th>
                       <th className="text-left py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Student</th>
                       <th className="text-right py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Total Score</th>
-                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Accuracy</th>
-                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Correct</th>
-                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Streak</th>
+                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Correct Answers</th>
                       {showQuestionMatrix && roomQuestions.map((q, qi) => (
                         <th key={qi} className="text-center py-4 px-2 text-zinc-400 font-bold uppercase tracking-wider text-[11px] w-12">
                           Q{qi + 1}
@@ -1473,7 +1495,7 @@ const BuizHost = () => {
                   <tbody className="divide-y divide-white/5">
                     {displayedPlayers.length === 0 ? (
                       <tr>
-                        <td colSpan={showQuestionMatrix ? 6 + roomQuestions.length : 6} className="text-center py-12 text-zinc-500">
+                        <td colSpan={showQuestionMatrix ? 4 + roomQuestions.length : 4} className="text-center py-12 text-zinc-500">
                           No participants found matching &ldquo;{leaderboardSearch}&rdquo;
                         </td>
                       </tr>
@@ -1497,29 +1519,13 @@ const BuizHost = () => {
                                   {player.name.slice(0, 1).toUpperCase()}
                                 </div>
                               )}
-                              <span className="truncate max-w-[220px]">{player.name}</span>
+                              <span className="truncate max-w-[260px]">{player.name}</span>
                             </td>
                             <td className="text-right py-3.5 px-4 font-mono font-black text-purple-400 text-base">
                               {player.score.toLocaleString()}
                             </td>
-                            <td className="text-center py-3.5 px-4">
-                              <div className="inline-flex items-center gap-2">
-                                <div className="w-16 bg-white/10 rounded-full h-1.5 overflow-hidden">
-                                  <div
-                                    className={`h-full ${stats.accuracy >= 80 ? 'bg-green-500' : stats.accuracy >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                                    style={{ width: `${stats.accuracy}%` }}
-                                  />
-                                </div>
-                                <span className={`font-bold font-mono text-xs ${stats.accuracy >= 80 ? 'text-green-400' : stats.accuracy >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                  {stats.accuracy}%
-                                </span>
-                              </div>
-                            </td>
-                            <td className="text-center py-3.5 px-4 text-zinc-300 font-mono text-xs">
+                            <td className="text-center py-3.5 px-4 text-zinc-200 font-mono text-sm font-bold">
                               {stats.correctCount} / {stats.totalQuestions}
-                            </td>
-                            <td className="text-center py-3.5 px-4 font-mono text-xs font-bold text-orange-400">
-                              {player.streak || 0}
                             </td>
                             {showQuestionMatrix && roomQuestions.map((q, qi) => {
                               const ans = player.answers?.[qi];

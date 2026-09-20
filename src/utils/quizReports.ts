@@ -209,13 +209,8 @@ export const downloadLeaderboardCSV = (data: QuizReportData): void => {
     '"Rank"',
     '"Player Name"',
     '"Total Score"',
-    '"Score % of Max"',
-    '"Accuracy (%)"',
     '"Correct Answers"',
-    '"Incorrect Answers"',
-    '"Total Questions"',
-    '"Max Streak"',
-    '"Completion Rate (%)"'
+    '"Total Questions"'
   ];
 
   // Per-question headers if available
@@ -231,19 +226,13 @@ export const downloadLeaderboardCSV = (data: QuizReportData): void => {
   sortedPlayers.forEach((player, idx) => {
     const rank = idx + 1;
     const stats = calculatePlayerStats(player, questions, totalQuestions, maxPossiblePoints);
-    const scorePct = maxPossiblePoints > 0 ? Math.round((player.score / maxPossiblePoints) * 100) : 0;
 
     const row = [
       `"${rank}"`,
       `"${(player.name || 'Anonymous').replace(/"/g, '""')}"`,
       `"${player.score || 0}"`,
-      `"${scorePct}%"`,
-      `"${stats.accuracy}%"`,
       `"${stats.correctCount}"`,
-      `"${stats.incorrectCount}"`,
-      `"${totalQuestions}"`,
-      `"${player.streak || 0}"`,
-      `"${stats.completionRate}%"`
+      `"${totalQuestions}"`
     ];
 
     // Per-question answer details
@@ -504,12 +493,11 @@ export const downloadLeaderboardPDF = (data: QuizReportData): void => {
       doc.setTextColor(15, 23, 42);
       doc.text((p.name || 'Anonymous').slice(0, 18), pX + 4, y + 12);
 
-      // Score & Accuracy
-      const pStats = calculatePlayerStats(p, questions, totalQuestions, maxPossiblePoints);
+      // Score
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
+      doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
-      doc.text(`${p.score.toLocaleString()} pts  •  ${pStats.accuracy}% acc`, pX + 4, y + 16.5);
+      doc.text(`${p.score.toLocaleString()} pts`, pX + 4, y + 16.5);
     });
 
     y += 24;
@@ -517,12 +505,10 @@ export const downloadLeaderboardPDF = (data: QuizReportData): void => {
 
   // --- Leaderboard Table ---
   const colWidths = {
-    rank: 16,
-    name: 58,
-    score: 30,
-    accuracy: 26,
-    correct: 28,
-    streak: 24
+    rank: 18,
+    name: 80,
+    score: 38,
+    correct: 38
   };
 
   const drawTableHeader = (atY: number) => {
@@ -537,19 +523,13 @@ export const downloadLeaderboardPDF = (data: QuizReportData): void => {
     doc.text('Rank', curX + colWidths.rank / 2, atY + 5.5, { align: 'center' });
     curX += colWidths.rank;
 
-    doc.text('Participant Name', curX + 3, atY + 5.5);
+    doc.text('Participant Name', curX + 4, atY + 5.5);
     curX += colWidths.name;
 
-    doc.text('Score', curX + colWidths.score - 3, atY + 5.5, { align: 'right' });
+    doc.text('Total Score', curX + colWidths.score - 4, atY + 5.5, { align: 'right' });
     curX += colWidths.score;
 
-    doc.text('Accuracy', curX + colWidths.accuracy / 2, atY + 5.5, { align: 'center' });
-    curX += colWidths.accuracy;
-
-    doc.text('Correct / Total', curX + colWidths.correct / 2, atY + 5.5, { align: 'center' });
-    curX += colWidths.correct;
-
-    doc.text('Best Streak', curX + colWidths.streak / 2, atY + 5.5, { align: 'center' });
+    doc.text('Correct Answers', curX + colWidths.correct / 2, atY + 5.5, { align: 'center' });
   };
 
   // Draw initial table header
@@ -598,36 +578,23 @@ export const downloadLeaderboardPDF = (data: QuizReportData): void => {
     doc.setFont('helvetica', idx < 3 ? 'bold' : 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(15, 23, 42);
-    doc.text((player.name || 'Anonymous').slice(0, 32), curX + 3, y + 4.8);
+    doc.text((player.name || 'Anonymous').slice(0, 42), curX + 4, y + 4.8);
     curX += colWidths.name;
 
     // Score
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(124, 58, 237); // Purple
-    doc.text(`${(player.score || 0).toLocaleString()}`, curX + colWidths.score - 3, y + 4.8, {
+    doc.text(`${(player.score || 0).toLocaleString()} pts`, curX + colWidths.score - 4, y + 4.8, {
       align: 'right'
     });
     curX += colWidths.score;
 
-    // Accuracy
-    doc.setFont('helvetica', 'normal');
-    if (stats.accuracy >= 80) doc.setTextColor(22, 163, 74); // Green
-    else if (stats.accuracy >= 50) doc.setTextColor(202, 138, 4); // Yellow
-    else doc.setTextColor(220, 38, 38); // Red
-
-    doc.text(`${stats.accuracy}%`, curX + colWidths.accuracy / 2, y + 4.8, { align: 'center' });
-    curX += colWidths.accuracy;
-
     // Correct / Total
-    doc.setTextColor(71, 85, 105);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
     doc.text(`${stats.correctCount} / ${totalQuestions}`, curX + colWidths.correct / 2, y + 4.8, {
       align: 'center'
     });
-    curX += colWidths.correct;
-
-    // Streak
-    doc.setTextColor(player.streak && player.streak >= 3 ? 234 : 100, player.streak && player.streak >= 3 ? 88 : 116, player.streak && player.streak >= 3 ? 12 : 139);
-    doc.text(`${player.streak || 0}`, curX + colWidths.streak / 2, y + 4.8, { align: 'center' });
 
     y += rowH;
   });
