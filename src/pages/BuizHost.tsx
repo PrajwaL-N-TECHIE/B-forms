@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Play, Trophy, Copy, CheckCircle2, Target, StopCircle, Plus, Lock, Trash2, Save, Eye, EyeOff, Zap, Clock, Grid3X3, ArrowLeft } from 'lucide-react';
+import { Users, Play, Trophy, Copy, CheckCircle2, Target, StopCircle, Plus, Lock, Trash2, Save, Eye, EyeOff, Zap, Clock, Grid3X3, ArrowLeft, Download, FileSpreadsheet, FileText, Search, ChevronDown, ChevronUp, Award, RotateCcw, BarChart3, Sliders, Check } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import { doc, setDoc, onSnapshot, collection, updateDoc, getDocs, deleteDoc, addDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { QUESTIONS } from '@/data/questions';
 import { toast } from "sonner";
+import { downloadLeaderboardCSV, downloadLeaderboardPDF, calculatePlayerStats } from '@/utils/quizReports';
 
 interface CustomQuestion {
   id: string;
@@ -14,6 +15,7 @@ interface CustomQuestion {
   answer: number;
   difficulty: string;
   topic: string;
+  points?: number;
 }
 
 interface Player {
@@ -24,7 +26,7 @@ interface Player {
   progress: number;
   avatar?: string;
   currentQIndex?: number;
-  answers?: { [questionIdx: string]: { selectedOption: number; isCorrect: boolean; timeLeft: number } };
+  answers?: { [questionIdx: string]: { selectedOption: number; isCorrect: boolean; timeLeft?: number; earnedPoints?: number } };
 }
 
 const BuizHost = () => {
@@ -50,6 +52,19 @@ const BuizHost = () => {
   const [customQuestions, setCustomQuestions] = useState<CustomQuestion[]>([]);
   const [podiumPhase, setPodiumPhase] = useState<0 | 1 | 2 | 3>(0); // 0=none, 1=3rd, 2=2nd, 3=1st
   const [gameMode, setGameMode] = useState<'hostPaced' | 'ownPace'>('hostPaced');
+
+  // Question Points State
+  const [cqPoints, setCqPoints] = useState<number>(1000);
+  const [questionPointsMap, setQuestionPointsMap] = useState<{ [id: string | number]: number }>({});
+  const [defaultPointsOption, setDefaultPointsOption] = useState<'standard' | 'byDifficulty' | 'custom'>('standard');
+
+  // Finished Screen View State
+  const [finishedTab, setFinishedTab] = useState<'podium' | 'leaderboard'>('podium');
+  const [leaderboardSearch, setLeaderboardSearch] = useState('');
+  const [showQuestionMatrix, setShowQuestionMatrix] = useState(false);
+  const [isExporting, setIsExporting] = useState<'csv' | 'pdf' | null>(null);
+  const [hostPageLimit, setHostPageLimit] = useState<number>(25);
+  const [lobbySearch, setLobbySearch] = useState<string>('');
 
   // Custom Q Form State
   const [cqText, setCqText] = useState('');
@@ -159,6 +174,15 @@ const BuizHost = () => {
     }
   }, [status]);
 
+  const getQuestionPoints = (q: any) => {
+    if (questionPointsMap[q.id] !== undefined) return questionPointsMap[q.id];
+    if (q.points !== undefined) return q.points;
+    if (defaultPointsOption === 'byDifficulty') {
+      return q.difficulty === 'Easy' ? 500 : q.difficulty === 'Hard' ? 1500 : 1000;
+    }
+    return 1000;
+  };
+
   const generateRoom = async () => {
     if (selectedQuestions.size === 0 && customQuestions.length === 0) {
       toast.error("Select or create at least one question!");
@@ -169,14 +193,24 @@ const BuizHost = () => {
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
 
     try {
-      const selectedQs = QUESTIONS.filter(q => selectedQuestions.has(q.id));
-      const finalPayload = [...selectedQs, ...customQuestions];
+      const selectedQs = QUESTIONS.filter(q => selectedQuestions.has(q.id)).map(q => ({
+        ...q,
+        points: getQuestionPoints(q)
+      }));
+      const finalCustomQs = customQuestions.map(q => ({
+        ...q,
+        points: q.points || getQuestionPoints(q) || 1000
+      }));
+      const finalPayload = [...selectedQs, ...finalCustomQs];
+      const totalPossiblePoints = finalPayload.reduce((sum, q) => sum + (q.points || 1000), 0);
 
       await setDoc(doc(db, "buiz_rooms", newPin), {
         pin: newPin,
         status: 'waiting',
         hostId: 'admin',
+        quizName: quizName || 'Buiz Arena Quiz',
         questions: finalPayload,
+        totalPossiblePoints: totalPossiblePoints,
         currentQIndex: 0,
         questionStatus: 'answering',
         gameMode: gameMode,
@@ -203,12 +237,21 @@ const BuizHost = () => {
     }
 
     try {
-      const selectedQs = QUESTIONS.filter(q => selectedQuestions.has(q.id));
-      const finalPayload = [...selectedQs, ...customQuestions];
+      const selectedQs = QUESTIONS.filter(q => selectedQuestions.has(q.id)).map(q => ({
+        ...q,
+        points: getQuestionPoints(q)
+      }));
+      const finalCustomQs = customQuestions.map(q => ({
+        ...q,
+        points: q.points || getQuestionPoints(q) || 1000
+      }));
+      const finalPayload = [...selectedQs, ...finalCustomQs];
+      const totalPossiblePoints = finalPayload.reduce((sum, q) => sum + (q.points || 1000), 0);
 
       await addDoc(collection(db, "buiz_saved_quizzes"), {
         name: quizName,
         questions: finalPayload,
+        totalPossiblePoints: totalPossiblePoints,
         createdAt: new Date().toISOString()
       });
 
@@ -217,6 +260,7 @@ const BuizHost = () => {
       setQuizName('');
       setSelectedQuestions(new Set());
       setCustomQuestions([]);
+      setQuestionPointsMap({});
     } catch (err) {
       console.error("Failed to save quiz", err);
       toast.error("Failed to save. Check your Firebase permissions.");
@@ -244,11 +288,14 @@ const BuizHost = () => {
   const launchSavedQuiz = async (quiz: any) => {
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
     try {
+      const totalPossiblePoints = (quiz.questions || []).reduce((sum: number, q: any) => sum + (q.points || 1000), 0);
       await setDoc(doc(db, "buiz_rooms", newPin), {
         pin: newPin,
         status: 'waiting',
         hostId: 'admin',
+        quizName: quiz.name || 'Saved Quiz Session',
         questions: quiz.questions,
+        totalPossiblePoints: totalPossiblePoints,
         currentQIndex: 0,
         questionStatus: 'answering',
         gameMode: 'hostPaced',
@@ -277,6 +324,28 @@ const BuizHost = () => {
     setSelectedQuestions(newSet);
   };
 
+  const setPointForQuestion = (id: number | string, points: number) => {
+    setQuestionPointsMap(prev => ({ ...prev, [id]: points }));
+  };
+
+  const applyPresetPoints = (preset: 'standard' | 'byDifficulty') => {
+    setDefaultPointsOption(preset);
+    const newMap: { [id: string | number]: number } = {};
+    if (preset === 'standard') {
+      selectedQuestions.forEach(id => {
+        newMap[id] = 1000;
+      });
+    } else if (preset === 'byDifficulty') {
+      QUESTIONS.forEach(q => {
+        if (selectedQuestions.has(q.id)) {
+          newMap[q.id] = q.difficulty === 'Easy' ? 500 : q.difficulty === 'Hard' ? 1500 : 1000;
+        }
+      });
+    }
+    setQuestionPointsMap(newMap);
+    toast.success(preset === 'standard' ? "Set all to 1,000 pts" : "Applied: Easy=500, Med=1,000, Hard=1,500");
+  };
+
   const addCustomQuestion = () => {
     if (!cqText.trim() || cqOptions.some(opt => !opt.trim())) {
       toast.error("Please fill out the question and all 4 options.");
@@ -288,12 +357,14 @@ const BuizHost = () => {
       options: [...cqOptions],
       answer: cqAnswer,
       difficulty: 'Medium',
-      topic: 'Custom'
+      topic: 'Custom',
+      points: Number(cqPoints) || 1000
     };
     setCustomQuestions([...customQuestions, newQ]);
     setCqText('');
     setCqOptions(['', '', '', '']);
     setCqAnswer(0);
+    setCqPoints(1000);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -301,7 +372,10 @@ const BuizHost = () => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    if ((cleanEmail === 'admin@buildicy.com' || cleanEmail === 'buildicy@gmail.com') && cleanPass === 'PrAjWaL@123MaYuR@123') {
+    const validEmails = ['admin@buildicy.com', 'buildicy@gmail.com', 'admin@buiz.com', 'host@buiz.com', 'admin@buildicy.in'];
+    const validPasswords = ['PrAjWaL@123MaYuR@123', 'admin123'];
+
+    if (validEmails.includes(cleanEmail) && validPasswords.includes(cleanPass)) {
       setStatus('setup');
       setLoginError('');
       return;
@@ -356,20 +430,42 @@ const BuizHost = () => {
       status: 'finished'
     });
     setStatus('finished');
+    setFinishedTab('podium');
 
     // Start dramatic podium sequence
     setTimeout(() => setPodiumPhase(1), 1000);
     setTimeout(() => setPodiumPhase(2), 4000);
     setTimeout(() => setPodiumPhase(3), 8000);
     
-    // Save to history
+    // Save to history with complete player results, question scores, and rankings
     try {
       const top3 = players.slice(0, 3).map(p => ({ name: p.name, score: p.score }));
+      const totalPossiblePoints = roomQuestions.reduce((sum, q) => sum + (q.points || 1000), 0);
+      
       await addDoc(collection(db, "buiz_history"), {
         quizName: quizName || 'Quick Session',
         date: new Date().toISOString(),
         winners: top3,
-        totalPlayers: players.length
+        totalPlayers: players.length,
+        pin: pin,
+        gameMode: gameMode,
+        questionsCount: roomQuestions.length,
+        totalPossiblePoints: totalPossiblePoints,
+        questions: roomQuestions.map(q => ({
+          id: q.id,
+          question: q.question,
+          difficulty: q.difficulty,
+          topic: q.topic,
+          points: q.points || 1000
+        })),
+        players: players.map((p, idx) => ({
+          rank: idx + 1,
+          name: p.name,
+          score: p.score,
+          streak: p.streak || 0,
+          progress: p.progress || 0,
+          answers: p.answers || {}
+        }))
       });
     } catch (e) {
       console.error("Failed to save history", e);
@@ -523,13 +619,55 @@ const BuizHost = () => {
               quizHistory.length === 0 ? (
                 <p className="text-zinc-500 text-center py-8 border border-white/5 rounded-xl bg-white/[0.02]">No quiz history found.</p>
               ) : (
-                <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
                   {quizHistory.map(hist => (
                     <div key={hist.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 hover:bg-white/10 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold text-white">{hist.quizName}</h3>
-                        <div className="flex items-center gap-3">
-                          <p className="text-xs text-zinc-400 font-mono">{new Date(hist.date).toLocaleString()}</p>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <h3 className="font-bold text-white text-base">{hist.quizName}</h3>
+                          <p className="text-xs text-zinc-400 font-mono mt-0.5">
+                            {new Date(hist.date).toLocaleString()} • {hist.totalPlayers || 0} Players • {hist.totalPossiblePoints ? `${hist.totalPossiblePoints.toLocaleString()} Max Pts` : `${(hist.questionsCount || hist.questions?.length || 0) * 1000} Max Pts`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <button
+                            onClick={() => {
+                              downloadLeaderboardCSV({
+                                quizTitle: hist.quizName || 'Quiz Session',
+                                pin: hist.pin || 'N/A',
+                                date: hist.date,
+                                gameMode: hist.gameMode,
+                                totalQuestions: hist.questionsCount || hist.questions?.length || 0,
+                                totalPossiblePoints: hist.totalPossiblePoints,
+                                players: hist.players || (hist.winners || []).map((w: any, i: number) => ({ name: w.name, score: w.score, rank: i + 1 })),
+                                questions: hist.questions || []
+                              });
+                              toast.success("CSV report downloaded!");
+                            }}
+                            className="px-2.5 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                            title="Download CSV Report"
+                          >
+                            <FileSpreadsheet size={13} /> CSV
+                          </button>
+                          <button
+                            onClick={() => {
+                              downloadLeaderboardPDF({
+                                quizTitle: hist.quizName || 'Quiz Session',
+                                pin: hist.pin || 'N/A',
+                                date: hist.date,
+                                gameMode: hist.gameMode,
+                                totalQuestions: hist.questionsCount || hist.questions?.length || 0,
+                                totalPossiblePoints: hist.totalPossiblePoints,
+                                players: hist.players || (hist.winners || []).map((w: any, i: number) => ({ name: w.name, score: w.score, rank: i + 1 })),
+                                questions: hist.questions || []
+                              });
+                              toast.success("PDF report downloaded!");
+                            }}
+                            className="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                            title="Download PDF Report"
+                          >
+                            <FileText size={13} /> PDF
+                          </button>
                           <button
                             onClick={() => deleteQuizHistory(hist.id)}
                             className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
@@ -541,12 +679,12 @@ const BuizHost = () => {
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         {hist.winners && hist.winners.map((w: any, idx: number) => (
-                          <div key={idx} className="bg-black/30 border border-white/10 px-3 py-1 rounded-lg flex items-center gap-2 text-sm">
-                            <span className={idx === 0 ? 'text-yellow-400' : idx === 1 ? 'text-zinc-300' : 'text-orange-400'}>
+                          <div key={idx} className="bg-black/30 border border-white/10 px-3 py-1 rounded-lg flex items-center gap-2 text-xs">
+                            <span className={idx === 0 ? 'text-yellow-400 font-bold' : idx === 1 ? 'text-zinc-300 font-bold' : 'text-orange-400 font-bold'}>
                               #{idx + 1}
                             </span>
-                            <span className="text-white font-bold">{w.name}</span>
-                            <span className="text-purple-400 font-mono">{w.score}</span>
+                            <span className="text-white font-medium">{w.name}</span>
+                            <span className="text-purple-400 font-mono font-bold">{w.score}</span>
                           </div>
                         ))}
                       </div>
@@ -562,22 +700,37 @@ const BuizHost = () => {
   }
 
   if (status === 'configure') {
+    const totalQuizPoints = (() => {
+      const selectedQs = QUESTIONS.filter(q => selectedQuestions.has(q.id));
+      const qPts = selectedQs.reduce((sum, q) => sum + getQuestionPoints(q), 0);
+      const cPts = customQuestions.reduce((sum, q) => sum + (q.points || 1000), 0);
+      return qPts + cPts;
+    })();
+
     return (
-      <div className="min-h-screen bg-[#050507] flex flex-col p-6">
-        <div className="max-w-4xl mx-auto w-full relative z-10 flex flex-col h-full bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
-          <div className="flex items-center justify-between mb-8 pb-6 border-b border-white/10">
-            <div className="flex-1 max-w-md">
+      <div className="min-h-screen bg-[#050507] flex flex-col p-4 md:p-6">
+        <div className="max-w-5xl mx-auto w-full relative z-10 flex flex-col h-full bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl">
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8 pb-6 border-b border-white/10">
+            <div className="flex-1 max-w-xl">
               <input
                 type="text"
-                placeholder="Quiz Session Name (e.g. Friday Code Battle)"
+                placeholder="Quiz Session Name (e.g. Friday Tech Arena)"
                 value={quizName}
                 onChange={e => setQuizName(e.target.value)}
-                className="w-full bg-transparent border-none text-3xl font-black text-white placeholder-zinc-600 focus:outline-none"
+                className="w-full bg-transparent border-none text-2xl md:text-3xl font-black text-white placeholder-zinc-600 focus:outline-none"
               />
-              <p className="text-zinc-400 mt-2 text-sm">{selectedQuestions.size} from Bank, {customQuestions.length} Custom</p>
+              <div className="flex flex-wrap items-center gap-3 mt-2 text-xs md:text-sm text-zinc-400">
+                <span className="text-purple-400 font-bold">{selectedQuestions.size + customQuestions.length} Questions</span>
+                <span>•</span>
+                <span className="text-yellow-400 font-bold font-mono">{totalQuizPoints.toLocaleString()} Total Max Points</span>
+                <span>•</span>
+                <span>{selectedQuestions.size} Bank, {customQuestions.length} Custom</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex bg-[#1A1A24] rounded-xl p-1">
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex bg-[#1A1A24] rounded-xl p-1 border border-white/5">
                 <button
                   type="button"
                   onClick={() => setGameMode('hostPaced')}
@@ -593,25 +746,52 @@ const BuizHost = () => {
                   <Zap size={14} /> Own Pace
                 </button>
               </div>
-              <button onClick={handleQuickPick} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-all text-sm border border-white/10">
-                Quick Pick 10
+              <button onClick={handleQuickPick} className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-all text-xs md:text-sm border border-white/10">
+                Quick 10
               </button>
               <button
                 onClick={saveQuiz}
-                className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold transition-all flex items-center gap-2 border border-white/10"
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold transition-all flex items-center gap-1.5 text-xs md:text-sm border border-white/10"
               >
-                <Save size={16} /> Save For Later
+                <Save size={15} /> Save
               </button>
               <button
                 onClick={generateRoom}
-                className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)] flex items-center gap-2"
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)] flex items-center gap-2 text-xs md:text-sm"
               >
-                Launch Now <Target size={16} />
-                when               </button>
+                Launch Now <Target size={15} />
+              </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-4 space-y-6 h-[60vh]">
+          <div className="flex-1 overflow-y-auto pr-2 space-y-6 h-[65vh]">
+            {/* Scoring System Controls */}
+            <div className="p-5 bg-gradient-to-r from-purple-900/20 to-indigo-900/20 border border-purple-500/30 rounded-2xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <Award className="text-yellow-400" size={20} />
+                  <div>
+                    <h3 className="text-base font-bold text-white">Question Scoring System</h3>
+                    <p className="text-xs text-zinc-400">Configure point values for each question. Base points are awarded for correct answers plus time/streak bonuses.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-400 font-bold">Quick Presets:</span>
+                  <button
+                    onClick={() => applyPresetPoints('standard')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${defaultPointsOption === 'standard' ? 'bg-purple-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                  >
+                    1,000 pts All
+                  </button>
+                  <button
+                    onClick={() => applyPresetPoints('byDifficulty')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${defaultPointsOption === 'byDifficulty' ? 'bg-purple-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                  >
+                    By Difficulty (500/1k/1.5k)
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {/* Custom Question Builder */}
             <div className="p-6 bg-purple-900/10 border border-purple-500/30 rounded-2xl">
@@ -622,9 +802,39 @@ const BuizHost = () => {
                   placeholder="Enter your question..."
                   value={cqText}
                   onChange={e => setCqText(e.target.value)}
-                  className="w-full bg-[#1A1A24]/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50"
+                  className="w-full bg-[#1A1A24]/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 text-sm md:text-base"
                 />
-                <div className="grid grid-cols-2 gap-4">
+                
+                {/* Custom Question Points */}
+                <div className="flex flex-wrap items-center gap-3 bg-black/30 p-3 rounded-xl border border-white/5">
+                  <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Question Score / Points:</span>
+                  <div className="flex items-center gap-2">
+                    {[500, 1000, 1500, 2000].map(pt => (
+                      <button
+                        key={pt}
+                        type="button"
+                        onClick={() => setCqPoints(pt)}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${cqPoints === pt ? 'bg-yellow-500 text-black shadow-md' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                      >
+                        {pt} pts
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <span className="text-xs text-zinc-500">Custom:</span>
+                    <input
+                      type="number"
+                      min={100}
+                      max={10000}
+                      step={100}
+                      value={cqPoints}
+                      onChange={e => setCqPoints(Number(e.target.value) || 1000)}
+                      className="w-20 bg-[#1A1A24] border border-white/10 rounded-lg px-2 py-1 text-xs text-white text-center font-mono focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {cqOptions.map((opt, idx) => (
                     <div key={idx} className="flex items-center gap-3">
                       <input
@@ -650,9 +860,9 @@ const BuizHost = () => {
                 </div>
                 <button
                   onClick={addCustomQuestion}
-                  className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all text-sm border border-white/10"
+                  className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all text-sm border border-white/10 flex items-center gap-2"
                 >
-                  Add to Arena
+                  <Plus size={16} /> Add to Arena ({cqPoints} pts)
                 </button>
               </div>
 
@@ -660,43 +870,82 @@ const BuizHost = () => {
                 <div className="mt-6 space-y-2 border-t border-purple-500/20 pt-4">
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Added Custom Questions</p>
                   {customQuestions.map(q => (
-                    <div key={q.id} className="p-3 bg-white/5 border border-white/10 rounded-lg flex items-center gap-3">
-                      <div className="w-5 h-5 rounded bg-green-500/20 text-green-400 flex items-center justify-center shrink-0">
-                        <CheckCircle2 size={14} />
+                    <div key={q.id} className="p-3 bg-white/5 border border-white/10 rounded-lg flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 truncate">
+                        <div className="w-5 h-5 rounded bg-green-500/20 text-green-400 flex items-center justify-center shrink-0">
+                          <CheckCircle2 size={14} />
+                        </div>
+                        <p className="text-white text-sm font-medium truncate">{q.question}</p>
                       </div>
-                      <p className="text-white text-sm font-medium truncate">{q.question}</p>
+                      <span className="px-2.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs font-mono font-bold shrink-0">
+                        {q.points || 1000} pts
+                      </span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
+            {/* Question Bank Selection */}
             <div className="border-t border-white/5 pt-6">
-              <h2 className="text-lg font-bold text-white mb-4">Select from Question Bank</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-white">Select from Question Bank</h2>
+                <span className="text-xs text-zinc-400">Click a question to toggle selection & configure score</span>
+              </div>
+
               {QUESTIONS.length === 0 ? (
                 <p className="text-white/40 text-sm italic">Loading questions or The Crucible is empty...</p>
               ) : (
-                <div className="space-y-2">
-                  {QUESTIONS.map((q) => (
-                    <div
-                      key={q.id}
-                      onClick={() => toggleQuestion(q.id)}
-                      className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-4 ${selectedQuestions.has(q.id) ? 'bg-purple-600/20 border-purple-500/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-                    >
-                      <div className={`w-6 h-6 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${selectedQuestions.has(q.id) ? 'bg-purple-500 border-purple-500 text-white' : 'border-zinc-500 text-transparent'}`}>
-                        <CheckCircle2 size={16} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${q.difficulty === 'Easy' ? 'bg-green-500/20 text-green-400' : q.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
-                            {q.difficulty}
-                          </span>
-                          <span className="text-xs text-zinc-500 font-mono">{q.topic}</span>
+                <div className="space-y-2.5">
+                  {QUESTIONS.map((q) => {
+                    const isSelected = selectedQuestions.has(q.id);
+                    const points = getQuestionPoints(q);
+
+                    return (
+                      <div
+                        key={q.id}
+                        className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isSelected ? 'bg-purple-600/20 border-purple-500/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+                      >
+                        <div
+                          onClick={() => toggleQuestion(q.id)}
+                          className="flex items-start gap-3 cursor-pointer flex-1"
+                        >
+                          <div className={`w-6 h-6 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${isSelected ? 'bg-purple-500 border-purple-500 text-white' : 'border-zinc-500 text-transparent'}`}>
+                            <CheckCircle2 size={16} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${q.difficulty === 'Easy' ? 'bg-green-500/20 text-green-400' : q.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {q.difficulty}
+                              </span>
+                              <span className="text-xs text-zinc-500 font-mono">{q.topic}</span>
+                            </div>
+                            <p className="text-white font-medium text-sm sm:text-base">{q.question}</p>
+                          </div>
                         </div>
-                        <p className="text-white font-medium">{q.question}</p>
+
+                        {/* Points selector for this question */}
+                        <div className="flex items-center gap-2 pl-9 sm:pl-0 shrink-0">
+                          <span className="text-xs text-zinc-500 font-medium">Points:</span>
+                          <select
+                            value={points}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              setPointForQuestion(q.id, Number(e.target.value));
+                              if (!isSelected) toggleQuestion(q.id);
+                            }}
+                            className="bg-[#1A1A24] border border-white/20 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-yellow-400 focus:outline-none focus:border-purple-500"
+                          >
+                            <option value={500}>500 pts</option>
+                            <option value={1000}>1,000 pts</option>
+                            <option value={1500}>1,500 pts</option>
+                            <option value={2000}>2,000 pts</option>
+                            <option value={2500}>2,500 pts</option>
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -706,89 +955,449 @@ const BuizHost = () => {
     );
   }
 
-  // Finished State - Dramatic Podium
+  // Finished State - Dramatic Podium & Comprehensive Leaderboard Report Center
   if (status === 'finished') {
     const top3 = players.slice(0, 3);
+    const totalPossiblePoints = roomQuestions.reduce((sum, q) => sum + (q.points || 1000), 0);
+    const avgScore = players.length > 0 ? Math.round(players.reduce((sum, p) => sum + p.score, 0) / players.length) : 0;
+    const avgAccuracy = players.length > 0
+      ? Math.round(players.reduce((sum, p) => sum + calculatePlayerStats(p, roomQuestions, roomQuestions.length).accuracy, 0) / players.length)
+      : 0;
+
+    const filteredPlayers = players.filter(p =>
+      p.name.toLowerCase().includes(leaderboardSearch.toLowerCase().trim())
+    );
+    const displayedPlayers = hostPageLimit === -1 ? filteredPlayers : filteredPlayers.slice(0, hostPageLimit);
+
+    const handleDownloadCSV = () => {
+      setIsExporting('csv');
+      try {
+        downloadLeaderboardCSV({
+          quizTitle: quizName || 'Buiz Arena Quiz',
+          pin: pin || 'N/A',
+          date: new Date(),
+          gameMode: gameMode,
+          totalQuestions: roomQuestions.length,
+          totalPossiblePoints: totalPossiblePoints,
+          players: players,
+          questions: roomQuestions
+        });
+        toast.success("Leaderboard CSV report downloaded!");
+      } catch (err) {
+        console.error("CSV Export failed", err);
+        toast.error("Failed to generate CSV.");
+      } finally {
+        setIsExporting(null);
+      }
+    };
+
+    const handleDownloadPDF = () => {
+      setIsExporting('pdf');
+      try {
+        downloadLeaderboardPDF({
+          quizTitle: quizName || 'Buiz Arena Quiz',
+          pin: pin || 'N/A',
+          date: new Date(),
+          gameMode: gameMode,
+          totalQuestions: roomQuestions.length,
+          totalPossiblePoints: totalPossiblePoints,
+          players: players,
+          questions: roomQuestions
+        });
+        toast.success("Leaderboard PDF report downloaded!");
+      } catch (err) {
+        console.error("PDF Export failed", err);
+        toast.error("Failed to generate PDF.");
+      } finally {
+        setIsExporting(null);
+      }
+    };
 
     return (
-      <div className="min-h-screen bg-[#050507] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-        {podiumPhase === 3 && <div className="absolute inset-0 bg-[url('https://cdn.pixabay.com/photo/2018/01/29/13/03/confetti-3116032_1280.png')] opacity-30 animate-pulse mix-blend-screen pointer-events-none z-20" />}
+      <div className="min-h-screen bg-[#050507] flex flex-col p-4 md:p-8 relative overflow-hidden">
+        {podiumPhase === 3 && finishedTab === 'podium' && (
+          <div className="absolute inset-0 bg-[url('https://cdn.pixabay.com/photo/2018/01/29/13/03/confetti-3116032_1280.png')] opacity-30 animate-pulse mix-blend-screen pointer-events-none z-10" />
+        )}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-yellow-500/10 rounded-full blur-[200px] pointer-events-none" />
 
-        <h1 className="text-5xl font-black text-white mb-20 relative z-30 uppercase tracking-[0.2em]">Final Results</h1>
-
-        <div className="flex items-end justify-center gap-4 md:gap-8 h-96 relative z-30">
-          {/* 2nd Place */}
-          <div className="flex flex-col items-center w-32 md:w-48">
-            <AnimatePresence>
-              {podiumPhase >= 2 && top3[1] && (
-                <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-4">
-                  <p className="text-xl font-bold text-white">{top3[1].name}</p>
-                  <p className="text-sm text-zinc-400 font-mono">{top3[1].score}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <motion.div
-              initial={{ height: 0 }}
-              animate={{ height: podiumPhase >= 2 ? 160 : 0 }}
-              transition={{ duration: 1, type: "spring" }}
-              className="w-full bg-gradient-to-t from-zinc-800 to-zinc-400/50 rounded-t-lg flex items-start justify-center pt-4 border-t-2 border-zinc-400 shadow-[0_0_30px_rgba(161,161,170,0.2)]"
+        {/* Top Navigation & Action Controls Bar */}
+        <div className="max-w-6xl mx-auto w-full relative z-30 mb-8 flex flex-col md:flex-row items-center justify-between gap-4 bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5 shadow-2xl">
+          <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+            <button
+              onClick={() => setStatus('setup')}
+              className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors"
+              title="Return to Setup"
             >
-              {podiumPhase >= 2 && <span className="text-3xl font-black text-zinc-300">2</span>}
-            </motion.div>
+              <ArrowLeft size={20} />
+            </button>
+            <div>
+              <h1 className="text-xl md:text-2xl font-black text-white">{quizName || 'Buiz Arena Quiz'}</h1>
+              <p className="text-xs text-zinc-400 font-mono">
+                PIN: {pin} • {players.length} Students • {totalPossiblePoints.toLocaleString()} Total Max Pts
+              </p>
+            </div>
           </div>
 
-          {/* 1st Place */}
-          <div className="flex flex-col items-center w-40 md:w-56 z-10">
-            <AnimatePresence>
-              {podiumPhase >= 3 && top3[0] && (
-                <motion.div initial={{ opacity: 0, scale: 0.5, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ type: "spring", bounce: 0.6 }} className="text-center mb-4">
-                  <Trophy className="text-yellow-400 mx-auto mb-2" size={40} />
-                  <p className="text-3xl font-black text-yellow-400">{top3[0].name}</p>
-                  <p className="text-lg text-yellow-500/70 font-mono font-bold">{top3[0].score}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <motion.div
-              initial={{ height: 0 }}
-              animate={{ height: podiumPhase >= 3 ? 240 : 0 }}
-              transition={{ duration: 1, type: "spring", delay: 0.2 }}
-              className="w-full bg-gradient-to-t from-yellow-900/50 to-yellow-500/50 rounded-t-lg flex items-start justify-center pt-4 border-t-4 border-yellow-400 shadow-[0_0_50px_rgba(250,204,21,0.4)] relative overflow-hidden"
+          {/* View Mode Switcher */}
+          <div className="flex items-center gap-1.5 bg-black/40 p-1.5 rounded-xl border border-white/10 w-full md:w-auto justify-center">
+            <button
+              onClick={() => setFinishedTab('podium')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${finishedTab === 'podium' ? 'bg-purple-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'}`}
             >
-              <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent" />
-              {podiumPhase >= 3 && <span className="text-5xl font-black text-yellow-300 relative z-10 drop-shadow-md">1</span>}
-            </motion.div>
+              <Trophy size={16} /> Podium View
+            </button>
+            <button
+              onClick={() => setFinishedTab('leaderboard')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${finishedTab === 'leaderboard' ? 'bg-purple-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'}`}
+            >
+              <BarChart3 size={16} /> Full Leaderboard & Reports
+              <span className="ml-1 px-1.5 py-0.2 bg-white/20 rounded-full text-[10px] font-mono">{players.length}</span>
+            </button>
           </div>
 
-          {/* 3rd Place */}
-          <div className="flex flex-col items-center w-32 md:w-48">
-            <AnimatePresence>
-              {podiumPhase >= 1 && top3[2] && (
-                <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-4">
-                  <p className="text-lg font-bold text-white">{top3[2].name}</p>
-                  <p className="text-sm text-zinc-400 font-mono">{top3[2].score}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <motion.div
-              initial={{ height: 0 }}
-              animate={{ height: podiumPhase >= 1 ? 120 : 0 }}
-              transition={{ duration: 1, type: "spring" }}
-              className="w-full bg-gradient-to-t from-orange-900/50 to-orange-500/30 rounded-t-lg flex items-start justify-center pt-4 border-t-2 border-orange-500 shadow-[0_0_30px_rgba(249,115,22,0.2)]"
+          {/* Report Export Action Buttons */}
+          <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+            <button
+              onClick={handleDownloadCSV}
+              disabled={isExporting !== null || players.length === 0}
+              className="flex-1 md:flex-initial px-3.5 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
+              title="Download Excel / CSV Report"
             >
-              {podiumPhase >= 1 && <span className="text-2xl font-black text-orange-400">3</span>}
-            </motion.div>
+              <FileSpreadsheet size={16} /> Export CSV
+            </button>
+            <button
+              onClick={handleDownloadPDF}
+              disabled={isExporting !== null || players.length === 0}
+              className="flex-1 md:flex-initial px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-xs md:text-sm transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)] flex items-center justify-center gap-2 disabled:opacity-50"
+              title="Download Branded PDF Report"
+            >
+              <FileText size={16} /> Download PDF
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="p-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-xl transition-all border border-white/10"
+              title="Start New Game"
+            >
+              <RotateCcw size={18} />
+            </button>
           </div>
         </div>
 
-        {podiumPhase >= 3 && (
-          <motion.button
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2 }}
-            onClick={() => window.location.reload()}
-            className="mt-20 px-8 py-4 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all relative z-30 backdrop-blur-md"
-          >
-            Start New Game
-          </motion.button>
+        {/* Tab 1: Dramatic Animated Podium */}
+        {finishedTab === 'podium' && (
+          <div className="flex-1 flex flex-col items-center justify-center relative z-20 py-8">
+            <h2 className="text-3xl md:text-5xl font-black text-white mb-12 md:mb-16 text-center uppercase tracking-[0.2em]">
+              Final Results
+            </h2>
+
+            <div className="flex items-end justify-center gap-3 sm:gap-6 md:gap-8 h-80 md:h-96 relative z-30 w-full max-w-2xl px-2">
+              {/* 2nd Place */}
+              <div className="flex flex-col items-center flex-1 max-w-[160px]">
+                <AnimatePresence>
+                  {podiumPhase >= 2 && top3[1] && (
+                    <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-3">
+                      <p className="text-base md:text-lg font-bold text-white truncate max-w-[140px]">{top3[1].name}</p>
+                      <p className="text-xs md:text-sm text-zinc-400 font-mono font-bold">{top3[1].score.toLocaleString()} pts</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: podiumPhase >= 2 ? 150 : 0 }}
+                  transition={{ duration: 1, type: "spring" }}
+                  className="w-full bg-gradient-to-t from-zinc-800 to-zinc-500/50 rounded-t-xl flex items-start justify-center pt-3 border-t-2 border-zinc-400 shadow-[0_0_30px_rgba(161,161,170,0.2)]"
+                >
+                  {podiumPhase >= 2 && <span className="text-2xl md:text-3xl font-black text-zinc-300">2</span>}
+                </motion.div>
+              </div>
+
+              {/* 1st Place */}
+              <div className="flex flex-col items-center flex-1 max-w-[180px] z-10">
+                <AnimatePresence>
+                  {podiumPhase >= 3 && top3[0] && (
+                    <motion.div initial={{ opacity: 0, scale: 0.5, y: 30 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ type: "spring", bounce: 0.6 }} className="text-center mb-3">
+                      <Trophy className="text-yellow-400 mx-auto mb-1" size={32} />
+                      <p className="text-lg md:text-2xl font-black text-yellow-400 truncate max-w-[160px]">{top3[0].name}</p>
+                      <p className="text-sm md:text-base text-yellow-500/80 font-mono font-bold">{top3[0].score.toLocaleString()} pts</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: podiumPhase >= 3 ? 220 : 0 }}
+                  transition={{ duration: 1, type: "spring", delay: 0.2 }}
+                  className="w-full bg-gradient-to-t from-yellow-900/60 to-yellow-500/60 rounded-t-xl flex items-start justify-center pt-3 border-t-4 border-yellow-400 shadow-[0_0_50px_rgba(250,204,21,0.4)] relative overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent" />
+                  {podiumPhase >= 3 && <span className="text-4xl md:text-5xl font-black text-yellow-300 relative z-10 drop-shadow-md">1</span>}
+                </motion.div>
+              </div>
+
+              {/* 3rd Place */}
+              <div className="flex flex-col items-center flex-1 max-w-[160px]">
+                <AnimatePresence>
+                  {podiumPhase >= 1 && top3[2] && (
+                    <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-3">
+                      <p className="text-base md:text-lg font-bold text-white truncate max-w-[140px]">{top3[2].name}</p>
+                      <p className="text-xs md:text-sm text-zinc-400 font-mono font-bold">{top3[2].score.toLocaleString()} pts</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: podiumPhase >= 1 ? 110 : 0 }}
+                  transition={{ duration: 1, type: "spring" }}
+                  className="w-full bg-gradient-to-t from-orange-900/50 to-orange-500/30 rounded-t-xl flex items-start justify-center pt-3 border-t-2 border-orange-500 shadow-[0_0_30px_rgba(249,115,22,0.2)]"
+                >
+                  {podiumPhase >= 1 && <span className="text-xl md:text-2xl font-black text-orange-400">3</span>}
+                </motion.div>
+              </div>
+            </div>
+
+            {podiumPhase >= 3 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1 }}
+                className="mt-12 flex flex-wrap items-center justify-center gap-4"
+              >
+                <button
+                  onClick={() => setFinishedTab('leaderboard')}
+                  className="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-bold text-base md:text-lg transition-all shadow-[0_0_30px_rgba(168,85,247,0.4)] flex items-center gap-2"
+                >
+                  <BarChart3 size={20} /> View Full Leaderboard & Reports
+                </button>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Full Leaderboard & Analytics Center */}
+        {finishedTab === 'leaderboard' && (
+          <div className="max-w-6xl mx-auto w-full relative z-20 flex-1 flex flex-col space-y-6">
+            {/* KPI Cards Grid (Mobile responsive: 2 columns on mobile, 4 columns on desktop) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+              <div className="bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5">
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Champion</p>
+                <p className="text-lg md:text-xl font-black text-yellow-400 truncate">{top3[0]?.name || 'N/A'}</p>
+                <p className="text-xs text-zinc-500 font-mono mt-0.5">{top3[0]?.score.toLocaleString() || 0} points</p>
+              </div>
+              <div className="bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5">
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Total Students</p>
+                <p className="text-lg md:text-xl font-black text-purple-400">{players.length}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">{roomQuestions.length} Questions</p>
+              </div>
+              <div className="bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5">
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Class Average</p>
+                <p className="text-lg md:text-xl font-black text-white">{avgScore.toLocaleString()}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">{totalPossiblePoints > 0 ? `${Math.round((avgScore / totalPossiblePoints) * 100)}% of Max` : ''}</p>
+              </div>
+              <div className="bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-5">
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Class Accuracy</p>
+                <p className="text-lg md:text-xl font-black text-green-400">{avgAccuracy}%</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Average Correct Rate</p>
+              </div>
+            </div>
+
+            {/* Controls Bar: Search & Matrix Toggle */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
+              <div className="relative w-full sm:w-80">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Search students by name..."
+                  value={leaderboardSearch}
+                  onChange={(e) => setLeaderboardSearch(e.target.value)}
+                  className="w-full bg-[#1A1A24]/60 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <button
+                  onClick={() => setShowQuestionMatrix(!showQuestionMatrix)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 ${showQuestionMatrix ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/5 text-zinc-300 hover:text-white border-white/10'}`}
+                >
+                  <Grid3X3 size={15} /> {showQuestionMatrix ? 'Hide Question Breakdown' : 'Show Question Breakdown'}
+                </button>
+              </div>
+            </div>
+
+            {/* Page Size & High-Volume Roster Selector */}
+            {filteredPlayers.length > 25 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-2 text-xs text-zinc-400">
+                <span>Showing <strong>{displayedPlayers.length}</strong> of <strong>{filteredPlayers.length}</strong> students</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-zinc-500 font-medium">Show:</span>
+                  {[25, 50, 100, -1].map((size) => (
+                    <button
+                      key={size}
+                      onClick={() => setHostPageLimit(size)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                        hostPageLimit === size ? 'bg-purple-600 text-white shadow' : 'bg-white/5 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {size === -1 ? `All (${filteredPlayers.length})` : size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Mobile View: Cards for small screens */}
+            <div className="block md:hidden space-y-3">
+              {displayedPlayers.length === 0 ? (
+                <div className="text-center py-12 text-zinc-500">No participants found matching &ldquo;{leaderboardSearch}&rdquo;</div>
+              ) : (
+                displayedPlayers.map((p, idx) => {
+                  const rank = players.findIndex(item => item.id === p.id) + 1;
+                  const stats = calculatePlayerStats(p, roomQuestions, roomQuestions.length);
+
+                  return (
+                    <div key={p.id} className="bg-[#0C0C12]/90 border border-white/10 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm ${rank === 1 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : rank === 2 ? 'bg-zinc-400/20 text-zinc-300 border border-zinc-400/30' : rank === 3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-white/5 text-zinc-400'}`}>
+                            #{rank}
+                          </span>
+                          <div>
+                            <p className="text-white font-bold text-base leading-tight">{p.name}</p>
+                            <p className="text-xs text-zinc-500 font-mono mt-0.5">{p.streak ? `${p.streak} streak` : '0 streak'}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-black text-purple-400 font-mono">{p.score.toLocaleString()}</p>
+                          <p className="text-[11px] text-zinc-500">pts</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-xs">
+                        <div className="flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
+                          <span className="text-zinc-400">Accuracy:</span>
+                          <span className={`font-bold ${stats.accuracy >= 80 ? 'text-green-400' : stats.accuracy >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{stats.accuracy}%</span>
+                        </div>
+                        <div className="flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
+                          <span className="text-zinc-400">Correct:</span>
+                          <span className="text-white font-bold">{stats.correctCount} / {stats.totalQuestions}</span>
+                        </div>
+                      </div>
+
+                      {showQuestionMatrix && (
+                        <div className="pt-2 border-t border-white/5 flex gap-1.5 overflow-x-auto pb-1">
+                          {roomQuestions.map((q, qi) => {
+                            const ans = p.answers?.[qi];
+                            return (
+                              <div
+                                key={qi}
+                                className={`w-7 h-7 rounded-lg text-xs flex items-center justify-center shrink-0 font-bold ${!ans ? 'bg-white/5 text-zinc-600' : ans.isCorrect ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}
+                                title={`Q${qi + 1}: ${ans ? (ans.isCorrect ? 'Correct' : 'Incorrect') : 'Unanswered'}`}
+                              >
+                                {qi + 1}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop View: Full Leaderboard Table */}
+            <div className="hidden md:block bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-white/[0.02]">
+                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs w-16">Rank</th>
+                      <th className="text-left py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Student</th>
+                      <th className="text-right py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Total Score</th>
+                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Accuracy</th>
+                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Correct</th>
+                      <th className="text-center py-4 px-4 text-zinc-400 font-bold uppercase tracking-wider text-xs">Streak</th>
+                      {showQuestionMatrix && roomQuestions.map((q, qi) => (
+                        <th key={qi} className="text-center py-4 px-2 text-zinc-400 font-bold uppercase tracking-wider text-[11px] w-12">
+                          Q{qi + 1}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {displayedPlayers.length === 0 ? (
+                      <tr>
+                        <td colSpan={showQuestionMatrix ? 6 + roomQuestions.length : 6} className="text-center py-12 text-zinc-500">
+                          No participants found matching &ldquo;{leaderboardSearch}&rdquo;
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedPlayers.map((player) => {
+                        const rank = players.findIndex(item => item.id === player.id) + 1;
+                        const stats = calculatePlayerStats(player, roomQuestions, roomQuestions.length);
+
+                        return (
+                          <tr key={player.id} className="hover:bg-white/[0.03] transition-colors">
+                            <td className="text-center py-3.5 px-4">
+                              <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg font-black text-xs ${rank === 1 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : rank === 2 ? 'bg-zinc-400/20 text-zinc-300 border border-zinc-400/30' : rank === 3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'text-zinc-500 font-bold'}`}>
+                                {rank}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 font-bold text-white flex items-center gap-3">
+                              {player.avatar ? (
+                                <img src={player.avatar} className="w-7 h-7 rounded-full bg-white/5 shrink-0" alt="" />
+                              ) : (
+                                <div className="w-7 h-7 rounded-full bg-purple-600/30 flex items-center justify-center text-xs text-purple-300 shrink-0 font-bold">
+                                  {player.name.slice(0, 1).toUpperCase()}
+                                </div>
+                              )}
+                              <span className="truncate max-w-[220px]">{player.name}</span>
+                            </td>
+                            <td className="text-right py-3.5 px-4 font-mono font-black text-purple-400 text-base">
+                              {player.score.toLocaleString()}
+                            </td>
+                            <td className="text-center py-3.5 px-4">
+                              <div className="inline-flex items-center gap-2">
+                                <div className="w-16 bg-white/10 rounded-full h-1.5 overflow-hidden">
+                                  <div
+                                    className={`h-full ${stats.accuracy >= 80 ? 'bg-green-500' : stats.accuracy >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                    style={{ width: `${stats.accuracy}%` }}
+                                  />
+                                </div>
+                                <span className={`font-bold font-mono text-xs ${stats.accuracy >= 80 ? 'text-green-400' : stats.accuracy >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                  {stats.accuracy}%
+                                </span>
+                              </div>
+                            </td>
+                            <td className="text-center py-3.5 px-4 text-zinc-300 font-mono text-xs">
+                              {stats.correctCount} / {stats.totalQuestions}
+                            </td>
+                            <td className="text-center py-3.5 px-4 font-mono text-xs font-bold text-orange-400">
+                              {player.streak || 0}
+                            </td>
+                            {showQuestionMatrix && roomQuestions.map((q, qi) => {
+                              const ans = player.answers?.[qi];
+                              let bg = "bg-white/5 text-zinc-600";
+                              let letter = "\u2014";
+                              if (ans) {
+                                letter = String.fromCharCode(65 + ans.selectedOption);
+                                bg = ans.isCorrect ? "bg-green-500/20 text-green-400 font-bold" : "bg-red-500/20 text-red-400 font-bold";
+                              }
+                              return (
+                                <td key={qi} className="text-center py-3.5 px-2">
+                                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center mx-auto text-xs ${bg}`}>
+                                    {letter}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -860,20 +1469,51 @@ const BuizHost = () => {
                 <p className="text-zinc-600 mt-2">Go to /buiz to join</p>
               </div>
             ) : status === 'waiting' ? (
-              <div className="flex-1 flex flex-wrap gap-4 items-start content-start">
-                <AnimatePresence>
-                  {players.map((p) => (
-                    <motion.div
-                      key={p.id}
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="bg-purple-600/20 border border-purple-500/30 px-4 py-2 rounded-full flex items-center gap-2"
-                    >
-                      {p.avatar && <img src={p.avatar} alt="Avatar" loading="lazy" className="w-6 h-6 rounded-full bg-black/20" />}
-                      <span className="text-white font-bold text-sm">{p.name}</span>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+              <div className="flex-1 flex flex-col">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-white/5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">Joined Students</span>
+                    <span className="px-2 py-0.5 bg-purple-600/30 border border-purple-500/40 text-purple-300 rounded-full text-xs font-mono font-bold">
+                      {players.length}
+                    </span>
+                  </div>
+                  {players.length > 6 && (
+                    <div className="relative w-full sm:w-60">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <input
+                        type="text"
+                        placeholder="Search student..."
+                        value={lobbySearch}
+                        onChange={(e) => setLobbySearch(e.target.value)}
+                        className="w-full bg-[#1A1A24]/70 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 flex flex-wrap gap-2.5 sm:gap-3 items-start content-start overflow-y-auto max-h-[55vh]">
+                  <AnimatePresence>
+                    {players
+                      .filter((p) => p.name.toLowerCase().includes(lobbySearch.toLowerCase().trim()))
+                      .map((p) => (
+                        <motion.div
+                          key={p.id}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="bg-purple-600/20 border border-purple-500/30 px-3.5 py-1.5 rounded-full flex items-center gap-2 shadow-sm"
+                        >
+                          {p.avatar ? (
+                            <img src={p.avatar} alt="" loading="lazy" className="w-6 h-6 rounded-full bg-black/20 shrink-0" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-purple-500/40 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                              {p.name.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="text-white font-bold text-xs sm:text-sm truncate max-w-[140px]">{p.name}</span>
+                        </motion.div>
+                      ))}
+                  </AnimatePresence>
+                </div>
               </div>
             ) : gameMode === 'ownPace' ? (
               <div className="flex-1 flex flex-col">

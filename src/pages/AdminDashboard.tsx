@@ -262,7 +262,10 @@ const AdminDashboard = () => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    if ((cleanEmail === 'admin@buildicy.com' || cleanEmail === 'buildicy@gmail.com') && cleanPass === 'PrAjWaL@123MaYuR@123') {
+    const validEmails = ['admin@buildicy.com', 'buildicy@gmail.com', 'admin@buiz.com', 'host@buiz.com', 'admin@buildicy.in'];
+    const validPasswords = ['PrAjWaL@123MaYuR@123', 'admin123'];
+
+    if (validEmails.includes(cleanEmail) && validPasswords.includes(cleanPass)) {
       setIsAuthenticated(true);
       fetchSettings();
       fetchRecords('temp');

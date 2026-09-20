@@ -310,7 +310,7 @@ app.post('/api/generate-pitch', async (req, res) => {
 // AI-SDR: Fully Automated Apollo.io Pipeline with Live Streaming
 app.post('/api/generate-campaign', async (req, res) => {
   try {
-    const { personaTitle, painPoint, systemPrompt, variationOf } = req.body;
+    const { personaTitle, painPoint, systemPrompt: customPrompt, variationOf } = req.body;
 
     if (!personaTitle) {
       return res.status(400).json({ error: 'Persona title is required (e.g. "SaaS Founder")' });
@@ -357,17 +357,15 @@ app.post('/api/generate-campaign', async (req, res) => {
     }
 
     // 2. Generate Emails for each lead and stream them immediately
-    let systemPrompt;
-    if (req.body.systemPrompt) {
-      systemPrompt = req.body.systemPrompt;
-    } else if (req.body.variationOf) {
-      // A/B variation: use the first prompt but add "Write a completely different version"
+    let systemPrompt = customPrompt;
+    if (!systemPrompt) {
       const promptPath = path.join(__dirname, 'prompts', 'sdr_system_prompt.jinja');
       const basePrompt = fs.readFileSync(promptPath, 'utf-8');
-      systemPrompt = basePrompt + '\n\nCRITICAL: This is a VARIATION. Write a completely DIFFERENT email from the first version. Change the opening, structure, and tone. Do NOT repeat the same approach.';
-    } else {
-      const promptPath = path.join(__dirname, 'prompts', 'sdr_system_prompt.jinja');
-      systemPrompt = fs.readFileSync(promptPath, 'utf-8');
+      if (variationOf) {
+        systemPrompt = basePrompt + '\n\nCRITICAL: This is a VARIATION. Write a completely DIFFERENT email from the first version. Change the opening, structure, and tone. Do NOT repeat the same approach.';
+      } else {
+        systemPrompt = basePrompt;
+      }
     }
 
     for (const person of people) {
