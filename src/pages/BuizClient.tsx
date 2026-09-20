@@ -403,9 +403,20 @@ const BuizClient = () => {
             </p>
           </div>
           
-          <p className="text-zinc-500 text-xs sm:text-sm">
-            Please wait for the host to finish the room to view the final rankings and download your official scorecard.
-          </p>
+          <div className="pt-1 flex flex-col gap-2">
+            <button
+              onClick={() => {
+                setOwnPaceDone(false);
+                setLocalQIndex(0);
+              }}
+              className="px-5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 mx-auto active:scale-95 cursor-pointer"
+            >
+              <Search size={14} /> Review My Answers
+            </button>
+            <p className="text-zinc-500 text-xs sm:text-sm">
+              Please wait for the host to finish the room to view the final rankings and download your official scorecard.
+            </p>
+          </div>
         </motion.div>
       </div>
     );
