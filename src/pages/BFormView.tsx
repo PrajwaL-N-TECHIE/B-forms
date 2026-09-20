@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 import { BForm, BFormQuestion } from '@/utils/bformReports';
-import { OFFICIAL_FEEDBACK_FORM, OFFICIAL_FEEDBACK_FORM_ID } from './BForms';
+import { OFFICIAL_FEEDBACK_FORM, OFFICIAL_FEEDBACK_FORM_ID, DEFAULT_BANNER_IMAGE } from './BForms';
 
 const BFormView = () => {
   const { id } = useParams<{ id: string }>();
@@ -280,13 +280,15 @@ const BFormView = () => {
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-purple-600/10 rounded-full blur-[160px] pointer-events-none" />
 
       <div className="max-w-2xl w-full relative z-10 space-y-6">
-        {/* Cover Image Banner */}
-        {form.coverImage && (
-          <div className="relative h-48 sm:h-64 rounded-3xl overflow-hidden border border-purple-500/30 shadow-2xl">
-            <img src={form.coverImage} alt={form.title} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0C0C12] via-transparent to-transparent opacity-90" />
-          </div>
-        )}
+        {/* Dynamic Cover Image Banner */}
+        <div className="relative w-full rounded-3xl overflow-hidden border border-purple-500/30 shadow-2xl bg-[#0C0C12]/90 flex items-center justify-center transition-all duration-300">
+          <img
+            src={form.coverImage || DEFAULT_BANNER_IMAGE}
+            alt={form.title}
+            className="w-full h-auto max-h-[480px] object-contain rounded-3xl block transition-all"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0C0C12]/60 via-transparent to-transparent pointer-events-none rounded-3xl" />
+        </div>
 
         {/* Form Title & Description Card */}
         <div className="bg-[#0C0C12]/90 border-t-4 border-t-purple-600 border border-purple-500/30 rounded-3xl p-6 sm:p-8 backdrop-blur-2xl shadow-xl space-y-4">

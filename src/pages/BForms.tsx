@@ -44,11 +44,13 @@ export const getPublicFormUrl = (formId: string) => {
   return `https://bforms.buildicy.com/${formId}`;
 };
 
+export const DEFAULT_BANNER_IMAGE = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80';
+
 export const OFFICIAL_FEEDBACK_FORM: BForm = {
   id: OFFICIAL_FEEDBACK_FORM_ID,
   title: 'B-Forms Platform & Experience Feedback',
   description: 'Help us shape the future of B-Forms! Share your candid feedback, favorite tools, and feature requests directly with our team.',
-  coverImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+  coverImage: DEFAULT_BANNER_IMAGE,
   status: 'active',
   responseCount: 0,
   questions: [
@@ -113,36 +115,15 @@ const BForms = () => {
   const [loadingResponses, setLoadingResponses] = useState<boolean>(false);
   const [responsesViewTab, setResponsesViewTab] = useState<'summary' | 'individual'>('summary');
 
-  // Form Builder state
-  const [formTitle, setFormTitle] = useState('Buildicy Feedback Survey');
-  const [formDescription, setFormDescription] = useState('Thank you for participating! Please take a few moments to share your candid feedback.');
+  // Form Builder state - starts completely fresh
+  const [formTitle, setFormTitle] = useState('');
+  const [formDescription, setFormDescription] = useState('');
   const [coverImage, setCoverImage] = useState<string>('');
   const [questions, setQuestions] = useState<BFormQuestion[]>([
     {
-      id: 'q_1',
-      title: 'How would you rate your overall experience with Buildicy?',
-      type: 'rating',
-      required: true,
-      ratingMax: 5
-    },
-    {
-      id: 'q_2',
-      title: 'What was your favorite aspect of the session?',
-      type: 'radio',
-      required: true,
-      options: ['Interactive Hands-on Practice', 'Clear Explanations', 'Buiz Arena Quiz Competitions', 'Mentorship & Support']
-    },
-    {
-      id: 'q_3',
-      title: 'Which topics would you like to explore next?',
-      type: 'checkbox',
-      required: false,
-      options: ['Full Stack AI Applications', 'Agentic Workflows & LLMs', 'Cloud & DevOps Architecture', 'UI/UX & Product Design']
-    },
-    {
-      id: 'q_4',
-      title: 'Any additional suggestions or comments for improvement?',
-      type: 'paragraph',
+      id: `q_${Date.now()}`,
+      title: '',
+      type: 'short_text',
       required: false
     }
   ]);
@@ -188,16 +169,6 @@ const BForms = () => {
             status: data.status || 'active'
           };
         });
-
-        // Ensure official feedback form is auto-seeded if missing
-        const hasOfficial = fetched.some((f) => f.id === OFFICIAL_FEEDBACK_FORM_ID);
-        if (!hasOfficial) {
-          setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', OFFICIAL_FEEDBACK_FORM_ID), {
-            ...OFFICIAL_FEEDBACK_FORM,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }).catch((e) => console.warn('Auto-seed notice:', e));
-        }
 
         setForms(fetched);
         setLoadingForms(false);
@@ -413,38 +384,17 @@ const BForms = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Start creating a brand new form
+  // Start creating a brand new form - fresh without any pre-populated template
   const handleCreateNewForm = () => {
     setEditingFormId(null);
-    setFormTitle('Buildicy Feedback Survey');
-    setFormDescription('Thank you for participating! Please take a few moments to share your candid feedback.');
+    setFormTitle('');
+    setFormDescription('');
     setCoverImage('');
     setQuestions([
       {
-        id: 'q_1',
-        title: 'How would you rate your overall experience with Buildicy?',
-        type: 'rating',
-        required: true,
-        ratingMax: 5
-      },
-      {
-        id: 'q_2',
-        title: 'What was your favorite aspect of the session?',
-        type: 'radio',
-        required: true,
-        options: ['Interactive Hands-on Practice', 'Clear Explanations', 'Buiz Arena Quiz Competitions', 'Mentorship & Support']
-      },
-      {
-        id: 'q_3',
-        title: 'Which topics would you like to explore next?',
-        type: 'checkbox',
-        required: false,
-        options: ['Full Stack AI Applications', 'Agentic Workflows & LLMs', 'Cloud & DevOps Architecture', 'UI/UX & Product Design']
-      },
-      {
-        id: 'q_4',
-        title: 'Any additional suggestions or comments for improvement?',
-        type: 'paragraph',
+        id: `q_${Date.now()}`,
+        title: '',
+        type: 'short_text',
         required: false
       }
     ]);
@@ -509,10 +459,6 @@ const BForms = () => {
 
   // Delete Form
   const deleteForm = async (formId: string) => {
-    if (formId === OFFICIAL_FEEDBACK_FORM_ID) {
-      toast.error('The official feedback form is protected and cannot be deleted.');
-      return;
-    }
     const targetForm = forms.find(f => f.id === formId) || activeForm;
     const formName = targetForm ? `"${targetForm.title}"` : 'this form';
     if (!window.confirm(`⚠️ Are you sure you want to permanently delete ${formName} and all its collected responses? This action cannot be undone.`)) {
@@ -720,47 +666,14 @@ const BForms = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-          {/* Main Navigation Segment */}
-          <div className="flex items-center bg-[#141224] p-1 rounded-xl border border-purple-500/30 shadow-sm">
+          {view !== 'dashboard' && (
             <button
               onClick={() => setView('dashboard')}
-              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                view === 'dashboard'
-                  ? 'bg-purple-600/35 text-white border border-purple-500/50 shadow-sm'
-                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
-              }`}
+              className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 bg-[#141224] hover:bg-white/10 text-purple-300 hover:text-white border border-purple-500/30 cursor-pointer"
             >
-              <Layers size={14} /> All Forms ({forms.length})
+              <ArrowLeft size={14} /> Back to All Forms
             </button>
-
-            <button
-              onClick={() => {
-                if (!activeForm && forms.length > 0) {
-                  setActiveForm(forms[0]);
-                }
-                setView('responses');
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                view === 'responses'
-                  ? 'bg-purple-600/35 text-white border border-purple-500/50 shadow-sm'
-                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
-              }`}
-              title="View Responses & Visual Analytics"
-            >
-              <BarChart3 size={14} /> Analytics &amp; Responses
-            </button>
-          </div>
-
-          <a
-            href={getPublicFormUrl(OFFICIAL_FEEDBACK_FORM_ID)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/30 text-purple-200 hover:text-white rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
-            title="Open Official B-Form Feedback"
-          >
-            <MessageSquare size={14} className="text-purple-400" />
-            <span className="hidden sm:inline">Feedback</span>
-          </a>
+          )}
 
           <button
             onClick={handleCreateNewForm}
@@ -885,18 +798,11 @@ const BForms = () => {
                 >
                   {/* Card Cover Image Header */}
                   <div className="h-32 bg-[#161424] relative overflow-hidden border-b border-purple-500/20">
-                    {form.coverImage ? (
-                      <img
-                        src={form.coverImage}
-                        alt={form.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-950/50 via-purple-900/30 to-[#0C0C12] text-purple-400/50">
-                        <ImageIcon size={32} />
-                        <span className="text-[10px] font-bold uppercase tracking-widest mt-1 text-purple-400/70">B-Forms</span>
-                      </div>
-                    )}
+                    <img
+                      src={form.coverImage || DEFAULT_BANNER_IMAGE}
+                      alt={form.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0C0C12] via-transparent to-transparent opacity-80" />
                     
                     {/* Status Badge */}
@@ -959,7 +865,7 @@ const BForms = () => {
                         </a>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           onClick={() => handleEditForm(form)}
                           className="px-2.5 py-1.5 bg-purple-900/40 hover:bg-purple-800/60 border border-purple-500/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm cursor-pointer"
@@ -973,18 +879,17 @@ const BForms = () => {
                             setView('responses');
                           }}
                           className="px-2.5 sm:px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                          title="View Responses & Analytics"
                         >
                           <BarChart3 size={13} /> Responses
                         </button>
-                        {form.id !== OFFICIAL_FEEDBACK_FORM_ID && (
-                          <button
-                            onClick={() => deleteForm(form.id)}
-                            className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition-colors"
-                            title="Delete Form"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => deleteForm(form.id)}
+                          className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 hover:text-red-200 rounded-lg font-bold text-xs transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                          title="Delete Form"
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
                       </div>
                     </div>
 
@@ -1059,82 +964,76 @@ const BForms = () => {
 
           {/* Form Header Card */}
           <div className="bg-[#0C0C12]/90 border-2 border-purple-500/40 rounded-3xl p-6 sm:p-8 backdrop-blur-2xl shadow-xl space-y-5">
-            {/* Cover Image Uploader */}
+            {/* Cover Image Uploader with dynamic resizing */}
             <div>
               <label className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">
                 <span className="flex items-center gap-1.5">
-                  <ImageIcon size={14} className="text-purple-400" /> Form Cover Banner (Optional)
+                  <ImageIcon size={14} className="text-purple-400" /> Form Cover Banner
                 </span>
                 {coverImage && (
                   <button
                     type="button"
                     onClick={() => setCoverImage('')}
-                    className="text-red-400 hover:text-red-300 text-xs font-semibold lowercase flex items-center gap-1 cursor-pointer"
+                    className="text-red-400 hover:text-red-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
                   >
-                    <X size={13} /> Remove banner
+                    <X size={13} /> Reset to Default Banner
                   </button>
                 )}
               </label>
 
-              {coverImage ? (
-                <div className="space-y-3">
-                  <div className="relative h-44 rounded-2xl overflow-hidden border border-purple-500/30 group">
-                    <img src={coverImage} alt="Cover Preview" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
-                      <label className="cursor-pointer px-4 py-2 bg-black/80 hover:bg-black text-white rounded-xl text-xs font-bold border border-white/20 transition-all flex items-center gap-1.5">
-                        <ImageIcon size={14} /> Change Image File
-                        <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                      </label>
+              {/* Dynamic banner preview frame that resizes dynamically to any uploaded image */}
+              <div className="space-y-3">
+                <div className="relative w-full rounded-2xl overflow-hidden border border-purple-500/30 group bg-[#161424] flex items-center justify-center transition-all duration-300 shadow-lg">
+                  <img
+                    src={coverImage || DEFAULT_BANNER_IMAGE}
+                    alt="Cover Preview"
+                    className="w-full h-auto max-h-[420px] object-contain rounded-2xl block transition-all"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <label className="cursor-pointer px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold border border-white/20 transition-all flex items-center gap-1.5 shadow-lg">
+                      <Upload size={14} /> Upload Custom Image
+                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    </label>
+                    {coverImage && (
                       <button
                         type="button"
                         onClick={() => setCoverImage('')}
                         className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Trash2 size={14} /> Remove Banner
+                        <Trash2 size={14} /> Reset to Default
                       </button>
-                    </div>
+                    )}
                   </div>
+                  {!coverImage && (
+                    <div className="absolute bottom-3 right-3 px-3 py-1 rounded-full bg-black/70 backdrop-blur-md border border-purple-500/30 text-[10px] font-bold text-purple-300 pointer-events-none">
+                      Default Wave Banner Applied
+                    </div>
+                  )}
+                </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="cursor-pointer px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl text-xs font-bold border border-purple-500/40 transition-all flex items-center gap-1.5">
-                      <Upload size={14} /> Replace File
-                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                    </label>
-                    <input
-                      type="url"
-                      placeholder="Or update with image URL (https://...)..."
-                      value={coverImage.startsWith('data:') ? '' : coverImage}
-                      onChange={(e) => setCoverImage(e.target.value)}
-                      className="flex-1 min-w-[200px] bg-[#161424] border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
-                    />
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer px-3.5 py-2 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white rounded-xl text-xs font-bold border border-purple-500/40 transition-all flex items-center gap-1.5 cursor-pointer">
+                    <Upload size={14} /> Upload Any Image File
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="Or paste custom image URL (https://...)..."
+                    value={coverImage.startsWith('data:') ? '' : coverImage}
+                    onChange={(e) => setCoverImage(e.target.value)}
+                    className="flex-1 min-w-[220px] bg-[#161424] border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                  />
+                  {coverImage && (
                     <button
                       type="button"
                       onClick={() => setCoverImage('')}
                       className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold border border-red-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Trash2 size={13} /> Remove
+                      <Trash2 size={13} /> Reset Default
                     </button>
-                  </div>
+                  )}
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="cursor-pointer block border-2 border-dashed border-purple-500/30 hover:border-purple-500/70 rounded-2xl p-6 text-center bg-[#141224]/50 hover:bg-[#141224] transition-all group">
-                    <ImageIcon className="mx-auto text-purple-400/60 group-hover:text-purple-400 group-hover:scale-110 transition-all mb-2" size={32} />
-                    <p className="text-xs sm:text-sm font-bold text-purple-200">Click to upload form cover banner</p>
-                    <p className="text-[11px] text-zinc-500 mt-1">PNG, JPG, WebP up to 2MB (recommended ratio: 16:9 or 3:1)</p>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      placeholder="Or paste an image URL directly (e.g. https://...)..."
-                      value={coverImage}
-                      onChange={(e) => setCoverImage(e.target.value)}
-                      className="flex-1 bg-[#161424] border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
 
             {/* Form Title & Description */}
@@ -1379,7 +1278,7 @@ const BForms = () => {
             </div>
 
             {/* Danger Zone: Delete Form when in Edit Mode */}
-            {editingFormId && editingFormId !== OFFICIAL_FEEDBACK_FORM_ID && (
+            {editingFormId && (
               <div className="mt-8 p-5 rounded-2xl bg-red-950/20 border border-red-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h4 className="text-sm font-bold text-red-300 flex items-center gap-2">
