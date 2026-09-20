@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 import { BForm, BFormQuestion } from '@/utils/bformReports';
+import { OFFICIAL_FEEDBACK_FORM, OFFICIAL_FEEDBACK_FORM_ID } from './BForms';
 
 const BFormView = () => {
   const { id } = useParams<{ id: string }>();
@@ -42,10 +43,16 @@ const BFormView = () => {
 
     const fetchForm = async () => {
       try {
-        const docRef = doc(db, 'b_forms', id);
+        const docRef = doc(db, 'buiz_rooms', '_bforms_', 'forms', id);
         const docSnap = await getDoc(docRef);
 
         if (!docSnap.exists()) {
+          // If accessing the official feedback form and not yet created in Firestore, load default
+          if (id === OFFICIAL_FEEDBACK_FORM_ID) {
+            setForm(OFFICIAL_FEEDBACK_FORM);
+            setLoading(false);
+            return;
+          }
           setError('Form Not Found. This form may have been deleted or the link is invalid.');
           setLoading(false);
           return;
@@ -63,6 +70,11 @@ const BFormView = () => {
         setLoading(false);
       } catch (err: any) {
         console.error('Error fetching form:', err);
+        if (id === OFFICIAL_FEEDBACK_FORM_ID) {
+          setForm(OFFICIAL_FEEDBACK_FORM);
+          setLoading(false);
+          return;
+        }
         setError('Failed to load form. Please check your internet connection.');
         setLoading(false);
       }
@@ -134,7 +146,7 @@ const BFormView = () => {
 
     try {
       // 1. Record response in Firestore
-      await addDoc(collection(db, 'b_forms_responses'), {
+      await addDoc(collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'), {
         formId: form.id,
         submittedAt: serverTimestamp(),
         answers: answers,
@@ -144,7 +156,7 @@ const BFormView = () => {
 
       // 2. Increment response counter in parent form
       try {
-        await updateDoc(doc(db, 'b_forms', form.id), {
+        await updateDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', form.id), {
           responseCount: increment(1)
         });
       } catch (countErr) {
@@ -497,9 +509,12 @@ const BFormView = () => {
             </button>
           </div>
 
-          <div className="text-center pt-2 pb-8">
+          <div className="text-center pt-3 pb-8 space-y-2">
             <p className="text-[11px] text-zinc-500 flex items-center justify-center gap-1">
               <ShieldCheck size={13} className="text-purple-400" /> Never submit passwords or confidential banking info through this form.
+            </p>
+            <p className="text-[11px] text-zinc-500">
+              Powered by <span className="text-purple-400 font-bold">B-Forms</span> • <a href="https://bforms.buildicy.com/bforms-feedback" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-white underline decoration-purple-500/40 font-medium transition-colors">Give B-Form Feedback</a>
             </p>
           </div>
         </form>

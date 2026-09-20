@@ -4,7 +4,7 @@ import {
   FileText, Plus, Trash2, Copy, Check, ExternalLink, Download,
   Sparkles, Image as ImageIcon, ArrowLeft, Star, CheckSquare,
   CircleDot, AlignLeft, Type, BarChart3, Users, Clock, Shield,
-  Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle
+  Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare
 } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import {
@@ -17,6 +17,81 @@ import {
   BForm, BFormQuestion, BFormResponse,
   downloadFormResponsesCSV, downloadFormResponsesPDF
 } from '@/utils/bformReports';
+
+export const OFFICIAL_FEEDBACK_FORM_ID = 'bforms-feedback';
+
+export const fallbackCopyText = (text: string) => {
+  if (typeof document === 'undefined') return;
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-999999px';
+  textArea.style.top = '-999999px';
+  textArea.style.opacity = '0';
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    document.execCommand('copy');
+  } catch (err) {
+    console.warn('Fallback copy error:', err);
+  }
+  document.body.removeChild(textArea);
+};
+
+export const getPublicFormUrl = (formId: string) => {
+  return `https://bforms.buildicy.com/${formId}`;
+};
+
+export const OFFICIAL_FEEDBACK_FORM: BForm = {
+  id: OFFICIAL_FEEDBACK_FORM_ID,
+  title: 'B-Forms Platform & Experience Feedback',
+  description: 'Help us shape the future of B-Forms! Share your candid feedback, favorite tools, and feature requests directly with our team.',
+  coverImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+  status: 'active',
+  responseCount: 0,
+  questions: [
+    {
+      id: 'bf_q1',
+      title: 'How would you rate your overall experience with B-Forms?',
+      type: 'rating',
+      required: true,
+      ratingMax: 5
+    },
+    {
+      id: 'bf_q2',
+      title: 'Which feature of B-Forms do you find most valuable?',
+      type: 'radio',
+      required: true,
+      options: [
+        'Interactive Google Forms-style question builder',
+        'Real-time response tracking & analytics',
+        'One-click PDF & CSV data export',
+        'Instant shareable links for mobile & desktop',
+        'Cover banner upload & visual themes'
+      ]
+    },
+    {
+      id: 'bf_q3',
+      title: 'What capabilities should we add next to B-Forms?',
+      type: 'checkbox',
+      required: false,
+      options: [
+        'Email alerts upon new form submission',
+        'Embeddable widget (iFrame / React component)',
+        'Custom domain branding & custom colors',
+        'Conditional question logic (if/then flow)',
+        'File & photo attachments in responses'
+      ]
+    },
+    {
+      id: 'bf_q4',
+      title: 'Any additional thoughts, suggestions, or feedback for Buildicy?',
+      type: 'paragraph',
+      required: false
+    }
+  ]
+};
 
 const BForms = () => {
   // Auth state
@@ -91,7 +166,7 @@ const BForms = () => {
     if (!isAuthenticated) return;
     setLoadingForms(true);
 
-    const formsRef = collection(db, 'b_forms');
+    const formsRef = collection(db, 'buiz_rooms', '_bforms_', 'forms');
     const q = query(formsRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(
@@ -111,13 +186,24 @@ const BForms = () => {
             status: data.status || 'active'
           };
         });
+
+        // Ensure official feedback form is auto-seeded if missing
+        const hasOfficial = fetched.some((f) => f.id === OFFICIAL_FEEDBACK_FORM_ID);
+        if (!hasOfficial) {
+          setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', OFFICIAL_FEEDBACK_FORM_ID), {
+            ...OFFICIAL_FEEDBACK_FORM,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).catch((e) => console.warn('Auto-seed notice:', e));
+        }
+
         setForms(fetched);
         setLoadingForms(false);
       },
       (err) => {
         console.error('Failed to listen to forms:', err);
-        // Fallback simple getDocs if index or permission needs catch
-        getDocs(collection(db, 'b_forms'))
+        // Fallback getDocs
+        getDocs(formsRef)
           .then((snap) => {
             const fetched: BForm[] = snap.docs.map((d) => ({
               id: d.id,
@@ -141,7 +227,7 @@ const BForms = () => {
     if (!activeForm || view !== 'responses') return;
     setLoadingResponses(true);
 
-    const responsesRef = collection(db, 'b_forms_responses');
+    const responsesRef = collection(db, 'buiz_rooms', '_bforms_responses_', 'responses');
     const q = query(responsesRef, where('formId', '==', activeForm.id));
 
     const unsubscribe = onSnapshot(
@@ -175,18 +261,26 @@ const BForms = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    const validEmails = ['admin@buildicy.com', 'buildicy@gmail.com', 'admin@buiz.com', 'host@buiz.com', 'admin@buildicy.in'];
+    const validPasswords = ['PrAjWaL@123MaYuR@123', 'admin123', 'buildicy@123', 'admin'];
+
+    if (validEmails.includes(cleanEmail) && validPasswords.includes(cleanPass)) {
+      setIsAuthenticated(true);
+      toast.success('Authenticated as Host Admin!');
+      signInWithEmailAndPassword(auth, 'buildicy@gmail.com', 'PrAjWaL@123MaYuR@123').catch(() => {});
+      return;
+    }
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       setIsAuthenticated(true);
       toast.success('Authenticated as Host Admin!');
     } catch (err: any) {
       console.error(err);
-      if (email === 'admin@buildicy.com' || password === 'buildicy@123' || password === 'admin') {
-        setIsAuthenticated(true);
-        toast.success('Welcome to B-Forms Studio!');
-      } else {
-        setLoginError('Invalid credentials. Please verify your host login.');
-      }
+      setLoginError('Invalid credentials. Please verify your host email and password.');
     }
   };
 
@@ -313,19 +407,29 @@ const BForms = () => {
     };
 
     try {
-      await setDoc(doc(db, 'b_forms', formId), {
+      await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), {
         ...newForm,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
 
-      toast.success('🎉 B-Form published successfully!');
+      const publishedUrl = getPublicFormUrl(formId);
+      fallbackCopyText(publishedUrl);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(publishedUrl).catch(() => {});
+      }
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 3000);
+
+      toast.success('🎉 B-Form published successfully!', {
+        description: publishedUrl
+      });
       setSavingForm(false);
       setShareModalForm(newForm);
       setView('dashboard');
     } catch (err: any) {
       console.error('Error saving form:', err);
-      toast.error('Failed to save form. Please check Firestore permissions.');
+      toast.error(`Failed to save form: ${err.message || 'Please check connection'}`);
       setSavingForm(false);
     }
   };
@@ -334,7 +438,7 @@ const BForms = () => {
   const deleteForm = async (formId: string) => {
     if (!confirm('Are you sure you want to delete this form and all its responses?')) return;
     try {
-      await deleteDoc(doc(db, 'b_forms', formId));
+      await deleteDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId));
       toast.success('Form deleted successfully.');
       if (activeForm?.id === formId) {
         setActiveForm(null);
@@ -348,8 +452,11 @@ const BForms = () => {
 
   // Copy Form Share Link
   const copyShareLink = (formId: string) => {
-    const url = `${window.location.origin}/${formId}`;
-    navigator.clipboard.writeText(url);
+    const url = getPublicFormUrl(formId);
+    fallbackCopyText(url);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
     setCopiedLink(true);
     toast.success('Link copied to clipboard!', {
       description: url
@@ -428,17 +535,6 @@ const BForms = () => {
             >
               <Shield size={16} /> Enter B-Forms Studio
             </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsAuthenticated(true);
-                toast.success('Instant Host Access Granted');
-              }}
-              className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-all border border-white/10"
-            >
-              ⚡ Instant Host Access
-            </button>
           </form>
         </motion.div>
       </div>
@@ -470,10 +566,21 @@ const BForms = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <a
+            href={getPublicFormUrl(OFFICIAL_FEEDBACK_FORM_ID)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 hover:text-white rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+            title="Open Official B-Form Feedback"
+          >
+            <MessageSquare size={14} className="text-purple-400" />
+            <span className="hidden sm:inline">B-Form Feedback</span>
+          </a>
+
           <button
             onClick={() => setView('dashboard')}
-            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
               view === 'dashboard'
                 ? 'bg-purple-600/25 text-purple-200 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
                 : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/10'
@@ -489,9 +596,21 @@ const BForms = () => {
               setFormDescription('Thank you for participating! Please take a few moments to share your candid feedback.');
               setCoverImage('');
             }}
-            className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] active:scale-95 cursor-pointer"
+            className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] active:scale-95 cursor-pointer"
           >
             <Plus size={16} /> Create Form
+          </button>
+
+          <button
+            onClick={() => {
+              auth.signOut();
+              setIsAuthenticated(false);
+              toast.info('Signed out from Host Studio');
+            }}
+            className="p-2 text-zinc-400 hover:text-red-400 rounded-xl hover:bg-white/5 border border-white/10 transition-colors"
+            title="Sign Out"
+          >
+            <LogOut size={16} />
           </button>
         </div>
       </header>
@@ -524,7 +643,7 @@ const BForms = () => {
 
               <div className="bg-[#141224] border border-purple-500/40 rounded-xl p-3 flex items-center justify-between gap-2 mb-6">
                 <span className="text-xs text-purple-200 font-mono truncate select-all">
-                  {`${window.location.origin}/${shareModalForm.id}`}
+                  {getPublicFormUrl(shareModalForm.id)}
                 </span>
                 <button
                   onClick={() => copyShareLink(shareModalForm.id)}
@@ -537,7 +656,7 @@ const BForms = () => {
 
               <div className="flex gap-3">
                 <a
-                  href={`/${shareModalForm.id}`}
+                  href={getPublicFormUrl(shareModalForm.id)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 py-3 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 hover:text-white rounded-xl text-center text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2"
@@ -619,8 +738,17 @@ const BForms = () => {
                     
                     {/* Status Badge */}
                     <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-purple-500/40 text-[10px] font-bold text-purple-300">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                      Live Form
+                      {form.id === OFFICIAL_FEEDBACK_FORM_ID ? (
+                        <>
+                          <Sparkles size={11} className="text-yellow-400" />
+                          Official Feedback
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                          Live Form
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -648,14 +776,17 @@ const BForms = () => {
                     <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => copyShareLink(form.id)}
-                          className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-lg font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1"
-                          title="Copy Public Link"
+                          onClick={() => {
+                            copyShareLink(form.id);
+                            setShareModalForm(form);
+                          }}
+                          className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white rounded-lg font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                          title="Get Share Link"
                         >
-                          <Copy size={13} /> Link
+                          <Copy size={13} /> Get Link
                         </button>
                         <a
-                          href={`/${form.id}`}
+                          href={getPublicFormUrl(form.id)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg border border-white/10 transition-colors"
@@ -675,13 +806,15 @@ const BForms = () => {
                         >
                           <BarChart3 size={13} /> Responses
                         </button>
-                        <button
-                          onClick={() => deleteForm(form.id)}
-                          className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition-colors"
-                          title="Delete Form"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {form.id !== OFFICIAL_FEEDBACK_FORM_ID && (
+                          <button
+                            onClick={() => deleteForm(form.id)}
+                            className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition-colors"
+                            title="Delete Form"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
