@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Play, Trophy, Copy, CheckCircle2, Target, StopCircle, Plus, Lock, Trash2, Save, Eye, EyeOff, Zap, Clock, Grid3X3, ArrowLeft, Download, FileSpreadsheet, FileText, Search, ChevronDown, ChevronUp, Award, RotateCcw, BarChart3, Sliders, Check, ChevronRight, Sparkles } from 'lucide-react';
+import { Users, Play, Trophy, Copy, CheckCircle2, Target, StopCircle, Plus, Lock, Trash2, Save, Eye, EyeOff, Zap, Clock, Grid3X3, ArrowLeft, Download, FileSpreadsheet, FileText, Search, ChevronDown, ChevronUp, Award, RotateCcw, BarChart3, Sliders, Check, ChevronRight, Sparkles, Edit3 } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import { doc, setDoc, onSnapshot, collection, updateDoc, getDocs, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
@@ -839,53 +839,120 @@ const BuizHost = () => {
       <div className="min-h-screen bg-[#050507] flex flex-col p-4 md:p-6">
         <div className="max-w-5xl mx-auto w-full relative z-10 flex flex-col h-full bg-[#0C0C12]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl">
           {/* Header */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8 pb-6 border-b border-white/10">
-            <div className="flex-1 max-w-xl">
-              <input
-                type="text"
-                placeholder="Quiz Session Name (e.g. Friday Tech Arena)"
-                value={quizName}
-                onChange={e => setQuizName(e.target.value)}
-                className="w-full bg-transparent border-none text-2xl md:text-3xl font-black text-white placeholder-zinc-600 focus:outline-none"
-              />
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-xs md:text-sm text-zinc-400">
-                <span className="text-purple-400 font-bold">{selectedQuestions.size + customQuestions.length} Questions</span>
-                <span>•</span>
-                <span className="text-yellow-400 font-bold font-mono">{totalQuizPoints.toLocaleString()} Total Max Points</span>
-                <span>•</span>
-                <span>{selectedQuestions.size} Bank, {customQuestions.length} Custom</span>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8 pb-6 border-b border-purple-500/20">
+            <div className="flex-1 max-w-2xl flex items-start gap-3">
+              <button
+                type="button"
+                onClick={() => setStatus('setup')}
+                className="mt-6 p-2.5 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-white rounded-xl border border-purple-500/30 transition-all shrink-0 active:scale-95"
+                title="Back to Host Menu"
+              >
+                <ArrowLeft size={18} />
+              </button>
+
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label htmlFor="quiz-session-title" className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-purple-300">
+                    <Edit3 size={14} className="text-purple-400" />
+                    <span>Quiz Session Name</span>
+                    <span className="text-purple-400/80 text-[10px] bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">
+                      Enter Name
+                    </span>
+                  </label>
+                  <span className="text-[11px] text-zinc-400 font-medium hidden sm:inline">
+                    Name your live quiz arena
+                  </span>
+                </div>
+
+                <div className="relative flex items-center bg-[#141224] border-2 border-purple-500/50 hover:border-purple-400 focus-within:border-purple-500 focus-within:ring-4 focus-within:ring-purple-500/25 rounded-2xl px-4 py-2.5 transition-all shadow-[0_0_20px_rgba(168,85,247,0.15)]">
+                  <input
+                    id="quiz-session-title"
+                    type="text"
+                    placeholder="Type Quiz Name here (e.g. AI & Tech Masterclass 2026)..."
+                    value={quizName}
+                    onChange={e => setQuizName(e.target.value)}
+                    className="w-full bg-transparent border-none text-base md:text-lg font-bold text-white placeholder-zinc-500 focus:outline-none"
+                  />
+                  {quizName ? (
+                    <button
+                      type="button"
+                      onClick={() => setQuizName('')}
+                      className="text-zinc-400 hover:text-white p-1 text-xs transition-colors shrink-0 ml-2"
+                      title="Clear title"
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <span className="text-xs text-purple-400/70 font-semibold shrink-0 ml-2 pointer-events-none hidden sm:inline">
+                      ✍️ Type name here
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 mt-2.5 text-xs">
+                  <span className="px-2.5 py-1 bg-purple-900/30 border border-purple-500/30 text-purple-300 font-bold rounded-lg flex items-center gap-1.5">
+                    <Sparkles size={12} className="text-purple-400" />
+                    {selectedQuestions.size + customQuestions.length} Questions Selected
+                  </span>
+                  <span className="px-2.5 py-1 bg-yellow-950/30 border border-yellow-500/30 text-yellow-300 font-bold font-mono rounded-lg flex items-center gap-1.5">
+                    <Award size={12} className="text-yellow-400" />
+                    {totalQuizPoints.toLocaleString()} Total Max Points
+                  </span>
+                  <span className="px-2.5 py-1 bg-white/5 border border-white/10 text-zinc-400 rounded-lg">
+                    {selectedQuestions.size} Bank &bull; {customQuestions.length} Custom
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex bg-[#1A1A24] rounded-xl p-1 border border-white/5">
+            {/* Action Buttons styled in Purple */}
+            <div className="flex flex-wrap items-center gap-2.5 lg:self-center">
+              <div className="flex bg-[#161226] rounded-xl p-1 border border-purple-500/30 shadow-inner">
                 <button
                   type="button"
                   onClick={() => setGameMode('hostPaced')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${gameMode === 'hostPaced' ? 'bg-purple-600 text-white' : 'text-zinc-500 hover:text-white'}`}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-all ${
+                    gameMode === 'hostPaced'
+                      ? 'bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                      : 'text-purple-300/70 hover:text-white hover:bg-purple-900/30'
+                  }`}
                 >
                   <Clock size={14} /> Host Paced
                 </button>
                 <button
                   type="button"
                   onClick={() => setGameMode('ownPace')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${gameMode === 'ownPace' ? 'bg-purple-600 text-white' : 'text-zinc-500 hover:text-white'}`}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-all ${
+                    gameMode === 'ownPace'
+                      ? 'bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                      : 'text-purple-300/70 hover:text-white hover:bg-purple-900/30'
+                  }`}
                 >
                   <Zap size={14} /> Own Pace
                 </button>
               </div>
-              <button onClick={handleQuickPick} className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-all text-xs md:text-sm border border-white/10">
+
+              <button
+                type="button"
+                onClick={handleQuickPick}
+                className="px-3.5 py-2.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 hover:text-white rounded-xl font-bold transition-all text-xs md:text-sm border border-purple-500/40 hover:border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.15)] flex items-center gap-1.5 active:scale-95"
+              >
+                <Sparkles size={14} className="text-purple-400" />
                 Quick 10
               </button>
+
               <button
+                type="button"
                 onClick={saveQuiz}
-                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold transition-all flex items-center gap-1.5 text-xs md:text-sm border border-white/10"
+                className="px-4 py-2.5 bg-purple-950/70 hover:bg-purple-900/90 text-purple-200 hover:text-white rounded-xl font-bold transition-all flex items-center gap-1.5 text-xs md:text-sm border border-purple-500/40 hover:border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.15)] active:scale-95"
               >
-                <Save size={15} /> Save
+                <Save size={15} className="text-purple-300" /> Save
               </button>
+
               <button
+                type="button"
                 onClick={generateRoom}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)] flex items-center gap-2 text-xs md:text-sm"
+                className="px-5 py-2.5 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-black transition-all shadow-[0_0_25px_rgba(168,85,247,0.5)] hover:shadow-[0_0_35px_rgba(168,85,247,0.7)] flex items-center gap-2 text-xs md:text-sm active:scale-95 tracking-wide"
               >
                 Launch Now <Target size={15} />
               </button>
@@ -912,19 +979,19 @@ const BuizHost = () => {
                   <span className="text-xs text-zinc-400 font-bold">Quick Presets:</span>
                   <button
                     onClick={() => applyPresetPoints('standard')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${defaultPointsOption === 'standard' ? 'bg-purple-600 text-white shadow-md' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${defaultPointsOption === 'standard' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)] border border-purple-400 scale-105' : 'bg-purple-950/40 text-purple-300 hover:text-white hover:bg-purple-900/60 border border-purple-500/30'}`}
                   >
                     1,000 pts All
                   </button>
                   <button
                     onClick={() => applyPresetPoints('byDifficulty')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${defaultPointsOption === 'byDifficulty' ? 'bg-purple-600 text-white shadow-md' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${defaultPointsOption === 'byDifficulty' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)] border border-purple-400 scale-105' : 'bg-purple-950/40 text-purple-300 hover:text-white hover:bg-purple-900/60 border border-purple-500/30'}`}
                   >
                     By Difficulty (500/1k/1.5k)
                   </button>
                   <button
                     onClick={() => applyPresetPoints('highStakes')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${defaultPointsOption === 'highStakes' ? 'bg-purple-600 text-white shadow-md' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${defaultPointsOption === 'highStakes' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)] border border-purple-400 scale-105' : 'bg-purple-950/40 text-purple-300 hover:text-white hover:bg-purple-900/60 border border-purple-500/30'}`}
                   >
                     2,000 pts High Stakes
                   </button>
@@ -955,7 +1022,7 @@ const BuizHost = () => {
                         key={pt}
                         type="button"
                         onClick={() => setCqPoints(pt)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${cqPoints === pt ? 'bg-yellow-500 text-black shadow-md scale-105' : 'bg-white/5 text-zinc-400 hover:text-white border border-white/10'}`}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${cqPoints === pt ? 'bg-yellow-500 text-black shadow-md scale-105 font-black' : 'bg-purple-950/40 text-purple-200 hover:text-white hover:bg-purple-900/50 border border-purple-500/30'}`}
                       >
                         {pt.toLocaleString()} pts {pt === 1000 ? '(Std)' : ''}
                       </button>
