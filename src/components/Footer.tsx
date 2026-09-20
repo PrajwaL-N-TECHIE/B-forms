@@ -304,10 +304,12 @@ const Footer = () => {
       { name: "Blog", path: "#" },
       { name: "Admin Portal", path: "/admin" },
       { name: "Host Buiz Arena", path: "/buiz/host" },
+      { name: "B-Forms (Studio)", path: "/b-forms" },
       { name: "Internal Portal", path: "/finance" }
     ],
     Solutions: [
       { name: "SaaS ROI Calculator", path: "/roi-calculator" },
+      { name: "B-Forms Feedback Engine", path: "/b-forms" },
       { name: "AI Studio", path: "#" },
       { name: "Analytics", path: "#" },
       { name: "Cloud Solutions", path: "#" },
@@ -319,6 +321,7 @@ const Footer = () => {
       { name: "Verify Certificate", path: "/verify" },
       { name: "Student Dashboard", path: "/student-login" },
       { name: "Buiz Arena", path: "/buiz" },
+      { name: "B-Forms (Feedback)", path: "/b-forms" },
       { name: "API Reference", path: "#" },
       { name: "Community", path: "#" }
     ],

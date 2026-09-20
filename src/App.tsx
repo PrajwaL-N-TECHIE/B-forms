@@ -36,6 +36,8 @@ const RoiCalculator = lazy(() => import("./pages/RoiCalculator"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const FinanceTracker = lazy(() => import("./pages/FinanceTracker"));
+const BForms = lazy(() => import("./pages/BForms"));
+const BFormView = lazy(() => import("./pages/BFormView"));
 
 const queryClient = new QueryClient();
 
@@ -58,6 +60,8 @@ const AnimatedRoutes = () => {
           <Route path="/verify" element={<VerifyCertificate />} />
           <Route path="/buiz" element={<BuizClient />} />
           <Route path="/buiz/host" element={<BuizHost />} />
+          <Route path="/b-forms" element={<BForms />} />
+          <Route path="/b-forms/:id" element={<BFormView />} />
           <Route path="/ai-sdr" element={<AiSdrDashboard />} />
           <Route path="/roi-calculator" element={<RoiCalculator />} />
           <Route path="/finance" element={<FinanceTracker />} />
@@ -70,7 +74,7 @@ const AnimatedRoutes = () => {
 
 const GlobalLayout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
-  const isStandaloneRoute = location.pathname.includes('/student-dashboard') || location.pathname.includes('/student-login') || location.pathname.includes('/admin') || location.pathname.includes('/buiz') || location.pathname.includes('/finance');
+  const isStandaloneRoute = location.pathname.includes('/student-dashboard') || location.pathname.includes('/student-login') || location.pathname.includes('/admin') || location.pathname.includes('/buiz') || location.pathname.includes('/finance') || location.pathname.includes('/b-forms');
 
   return (
     <div className="bg-[#050507] min-h-screen flex flex-col text-white">
