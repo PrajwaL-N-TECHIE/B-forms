@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, Play, Trophy, Copy, CheckCircle2, Target, StopCircle, Plus, Lock, Trash2, Save, Eye, EyeOff, Zap, Clock, Grid3X3, ArrowLeft, Download, FileSpreadsheet, FileText, Search, ChevronDown, ChevronUp, Award, RotateCcw, BarChart3, Sliders, Check, ChevronRight, Sparkles } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
-import { doc, setDoc, onSnapshot, collection, updateDoc, getDocs, deleteDoc, addDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, updateDoc, getDocs, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { QUESTIONS } from '@/data/questions';
 import { toast } from "sonner";
@@ -284,6 +284,82 @@ const BuizHost = () => {
     }
   };
 
+  const handleExportHistory = async (hist: any, format: 'csv' | 'pdf') => {
+    try {
+      let finalPlayers = hist.players && hist.players.length > 0 ? [...hist.players] : [];
+      let finalQuestions = hist.questions || [];
+      let questionsCount = hist.questionsCount || finalQuestions.length || 0;
+      let totalPossiblePoints = hist.totalPossiblePoints || 0;
+
+      // If historical record has <= 3 players or missing questions, attempt recovery from room in Firestore
+      if (hist.pin && (finalPlayers.length <= 3 || finalQuestions.length === 0)) {
+        try {
+          const roomDocSnap = await getDoc(doc(db, "buiz_rooms", hist.pin));
+          if (roomDocSnap.exists()) {
+            const roomData = roomDocSnap.data();
+            if ((!finalQuestions || finalQuestions.length === 0) && roomData.questions) {
+              finalQuestions = roomData.questions;
+              questionsCount = roomData.questions.length;
+            }
+            if (!totalPossiblePoints && roomData.totalPossiblePoints) {
+              totalPossiblePoints = roomData.totalPossiblePoints;
+            }
+          }
+
+          const playersSnap = await getDocs(collection(db, "buiz_rooms", hist.pin, "players"));
+          if (!playersSnap.empty && playersSnap.size > finalPlayers.length) {
+            const fetched = playersSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+            fetched.sort((a, b) => (b.score || 0) - (a.score || 0));
+            finalPlayers = fetched.map((p, idx) => ({
+              rank: idx + 1,
+              name: p.name,
+              score: p.score,
+              streak: p.streak || 0,
+              progress: p.progress || 0,
+              answers: p.answers || {}
+            }));
+          }
+        } catch (fetchErr) {
+          console.warn("Could not retrieve original room players for history", fetchErr);
+        }
+      }
+
+      // If still no players, fallback to winners
+      if (finalPlayers.length === 0 && hist.winners && hist.winners.length > 0) {
+        finalPlayers = hist.winners.map((w: any, idx: number) => ({
+          rank: idx + 1,
+          name: w.name,
+          score: w.score,
+          streak: 0,
+          progress: 100,
+          answers: {}
+        }));
+      }
+
+      const reportPayload = {
+        quizTitle: hist.quizName || 'Buiz Arena Quiz',
+        pin: hist.pin || 'N/A',
+        date: hist.date,
+        gameMode: hist.gameMode,
+        totalQuestions: questionsCount,
+        totalPossiblePoints: totalPossiblePoints,
+        players: finalPlayers,
+        questions: finalQuestions
+      };
+
+      if (format === 'csv') {
+        downloadLeaderboardCSV(reportPayload);
+        toast.success(`Exported ${finalPlayers.length} participants to CSV!`);
+      } else {
+        downloadLeaderboardPDF(reportPayload);
+        toast.success(`Exported ${finalPlayers.length} participants to PDF!`);
+      }
+    } catch (err) {
+      console.error("Failed to export history", err);
+      toast.error(`Failed to export ${format.toUpperCase()}`);
+    }
+  };
+
   const launchSavedQuiz = async (quiz: any) => {
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
     try {
@@ -470,16 +546,29 @@ const BuizHost = () => {
     setTimeout(() => setPodiumPhase(2), 4000);
     setTimeout(() => setPodiumPhase(3), 8000);
     
-    // Save to history with complete player results, question scores, and rankings
+    // Save to history with all attended player results, question scores, and rankings
     try {
-      const top3 = players.slice(0, 3).map(p => ({ name: p.name, score: p.score }));
+      let allCurrentPlayers = players;
+      try {
+        const playersSnap = await getDocs(collection(db, "buiz_rooms", pin, "players"));
+        if (!playersSnap.empty) {
+          const fetchedPlayers = playersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Player));
+          fetchedPlayers.sort((a, b) => (b.score || 0) - (a.score || 0));
+          allCurrentPlayers = fetchedPlayers;
+          setPlayers(fetchedPlayers);
+        }
+      } catch (err) {
+        console.error("Failed to query fresh players for history", err);
+      }
+
+      const top3 = allCurrentPlayers.slice(0, 3).map(p => ({ name: p.name, score: p.score }));
       const totalPossiblePoints = roomQuestions.reduce((sum, q) => sum + (q.points || 1000), 0);
       
       await addDoc(collection(db, "buiz_history"), {
         quizName: quizName || 'Quick Session',
         date: new Date().toISOString(),
         winners: top3,
-        totalPlayers: players.length,
+        totalPlayers: allCurrentPlayers.length,
         pin: pin,
         gameMode: gameMode,
         questionsCount: roomQuestions.length,
@@ -491,7 +580,7 @@ const BuizHost = () => {
           topic: q.topic,
           points: q.points || 1000
         })),
-        players: players.map((p, idx) => ({
+        players: allCurrentPlayers.map((p, idx) => ({
           rank: idx + 1,
           name: p.name,
           score: p.score,
@@ -664,38 +753,14 @@ const BuizHost = () => {
                         </div>
                         <div className="flex items-center gap-2 self-end sm:self-auto">
                           <button
-                            onClick={() => {
-                              downloadLeaderboardCSV({
-                                quizTitle: hist.quizName || 'Quiz Session',
-                                pin: hist.pin || 'N/A',
-                                date: hist.date,
-                                gameMode: hist.gameMode,
-                                totalQuestions: hist.questionsCount || hist.questions?.length || 0,
-                                totalPossiblePoints: hist.totalPossiblePoints,
-                                players: hist.players || (hist.winners || []).map((w: any, i: number) => ({ name: w.name, score: w.score, rank: i + 1 })),
-                                questions: hist.questions || []
-                              });
-                              toast.success("CSV report downloaded!");
-                            }}
+                            onClick={() => handleExportHistory(hist, 'csv')}
                             className="px-2.5 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
                             title="Download CSV Report"
                           >
                             <FileSpreadsheet size={13} /> CSV
                           </button>
                           <button
-                            onClick={() => {
-                              downloadLeaderboardPDF({
-                                quizTitle: hist.quizName || 'Quiz Session',
-                                pin: hist.pin || 'N/A',
-                                date: hist.date,
-                                gameMode: hist.gameMode,
-                                totalQuestions: hist.questionsCount || hist.questions?.length || 0,
-                                totalPossiblePoints: hist.totalPossiblePoints,
-                                players: hist.players || (hist.winners || []).map((w: any, i: number) => ({ name: w.name, score: w.score, rank: i + 1 })),
-                                questions: hist.questions || []
-                              });
-                              toast.success("PDF report downloaded!");
-                            }}
+                            onClick={() => handleExportHistory(hist, 'pdf')}
                             className="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
                             title="Download PDF Report"
                           >
@@ -1024,9 +1089,23 @@ const BuizHost = () => {
     );
     const displayedPlayers = hostPageLimit === -1 ? filteredPlayers : filteredPlayers.slice(0, hostPageLimit);
 
-    const handleDownloadCSV = () => {
+    const handleDownloadCSV = async () => {
       setIsExporting('csv');
       try {
+        let exportPlayers = players;
+        if (pin) {
+          try {
+            const playersSnap = await getDocs(collection(db, "buiz_rooms", pin, "players"));
+            if (!playersSnap.empty) {
+              const freshList = playersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Player));
+              freshList.sort((a, b) => (b.score || 0) - (a.score || 0));
+              exportPlayers = freshList;
+              setPlayers(freshList);
+            }
+          } catch (e) {
+            console.error("Could not refresh players for CSV export", e);
+          }
+        }
         downloadLeaderboardCSV({
           quizTitle: quizName || 'Buiz Arena Quiz',
           pin: pin || 'N/A',
@@ -1034,10 +1113,10 @@ const BuizHost = () => {
           gameMode: gameMode,
           totalQuestions: roomQuestions.length,
           totalPossiblePoints: totalPossiblePoints,
-          players: players,
+          players: exportPlayers,
           questions: roomQuestions
         });
-        toast.success("Leaderboard CSV report downloaded!");
+        toast.success(`Leaderboard CSV report (${exportPlayers.length} participants) downloaded!`);
       } catch (err) {
         console.error("CSV Export failed", err);
         toast.error("Failed to generate CSV.");
@@ -1046,9 +1125,23 @@ const BuizHost = () => {
       }
     };
 
-    const handleDownloadPDF = () => {
+    const handleDownloadPDF = async () => {
       setIsExporting('pdf');
       try {
+        let exportPlayers = players;
+        if (pin) {
+          try {
+            const playersSnap = await getDocs(collection(db, "buiz_rooms", pin, "players"));
+            if (!playersSnap.empty) {
+              const freshList = playersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Player));
+              freshList.sort((a, b) => (b.score || 0) - (a.score || 0));
+              exportPlayers = freshList;
+              setPlayers(freshList);
+            }
+          } catch (e) {
+            console.error("Could not refresh players for PDF export", e);
+          }
+        }
         downloadLeaderboardPDF({
           quizTitle: quizName || 'Buiz Arena Quiz',
           pin: pin || 'N/A',
@@ -1056,10 +1149,10 @@ const BuizHost = () => {
           gameMode: gameMode,
           totalQuestions: roomQuestions.length,
           totalPossiblePoints: totalPossiblePoints,
-          players: players,
+          players: exportPlayers,
           questions: roomQuestions
         });
-        toast.success("Leaderboard PDF report downloaded!");
+        toast.success(`Leaderboard PDF report (${exportPlayers.length} participants) downloaded!`);
       } catch (err) {
         console.error("PDF Export failed", err);
         toast.error("Failed to generate PDF.");

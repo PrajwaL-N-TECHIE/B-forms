@@ -283,8 +283,17 @@ const BuizClient = () => {
       setSelectedOption(selectedIdx);
       setShowFeedback('waiting');
       
-      const progress = (currentQIndex + 1) / questions.length;
-      updatePlayerScore(score, streak, progress);
+      const currentIdx = currentQIndex;
+      const q = questions[currentIdx];
+      const isCorrect = selectedIdx === q?.answer;
+      const immediateAnswers = {
+        ...answers,
+        [currentIdx]: { selectedOption: selectedIdx, isCorrect, timeLeft }
+      };
+      setAnswers(immediateAnswers);
+
+      const progress = (currentQIndex + 1) / (questions.length || 1);
+      updatePlayerScore(score, streak, progress, immediateAnswers);
     }
   };
 
@@ -308,7 +317,8 @@ const BuizClient = () => {
   useEffect(() => {
     if (questionStatus === 'revealed' && roomStatus === 'playing' && gameMode === 'hostPaced') {
       const q = questions[currentQIndex];
-      const isCorrect = selectedOption === q?.answer;
+      const currentSelected = selectedOption;
+      const isCorrect = currentSelected !== null && currentSelected === q?.answer;
       const basePoints = q?.points || 1000;
       
       let newScore = score;
@@ -336,15 +346,15 @@ const BuizClient = () => {
       setScore(newScore);
       setStreak(newStreak);
       
-      const progress = (currentQIndex + 1) / questions.length;
+      const progress = (currentQIndex + 1) / (questions.length || 1);
       const updatedAnswers = {
         ...answers,
-        [currentQIndex]: { selectedOption: selectedOption ?? -1, isCorrect, earnedPoints: earned, timeLeft }
+        [currentQIndex]: { selectedOption: currentSelected ?? -1, isCorrect, earnedPoints: earned, timeLeft }
       };
       setAnswers(updatedAnswers);
       updatePlayerScore(newScore, newStreak, progress, updatedAnswers);
     }
-  }, [questionStatus]);
+  }, [questionStatus, roomStatus, gameMode, currentQIndex, selectedOption, timeLeft, score, streak, questions]);
 
   // Memoized filter for 50-200+ students on mobile
   const filteredLeaderboard = useMemo(() => {
