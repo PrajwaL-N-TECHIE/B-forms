@@ -1,12 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Plus, Trash2, Copy, Check, ExternalLink, Download,
   Sparkles, Image as ImageIcon, ArrowLeft, Star, CheckSquare,
   CircleDot, AlignLeft, Type, BarChart3, Users, Clock, Shield,
   Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare,
-  Edit, ChevronUp, ChevronDown, ArrowRight, Upload
+  Edit, ChevronUp, ChevronDown, ArrowRight, Upload,
+  TrendingUp, Activity, PieChart as PieChartIcon, BarChart2, List
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  CartesianGrid
+} from 'recharts';
 import { db, auth } from '@/lib/firebase';
 import {
   collection, doc, setDoc, getDocs, deleteDoc, onSnapshot,
@@ -42,6 +57,47 @@ export const fallbackCopyText = (text: string) => {
 
 export const getPublicFormUrl = (formId: string) => {
   return `https://bforms.buildicy.com/${formId}`;
+};
+
+export const CHART_PALETTE = [
+  '#a855f7', // Purple
+  '#3b82f6', // Blue
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#8b5cf6', // Violet
+  '#f97316', // Orange
+  '#14b8a6', // Teal
+  '#e11d48'  // Rose
+];
+
+export const GlassmorphicTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0];
+    const itemName = label || data?.name || data?.payload?.name;
+    const value = data?.value;
+    const pct = data?.payload?.pct;
+    const color = data?.color || data?.payload?.color || data?.payload?.fill || '#a855f7';
+
+    return (
+      <div className="bg-[#0e0c1a]/95 border border-purple-500/40 px-3.5 py-2.5 rounded-xl shadow-2xl backdrop-blur-xl text-xs z-50 pointer-events-none">
+        <p className="font-bold text-white mb-1.5 max-w-[220px] truncate">{itemName}</p>
+        <div className="flex items-center gap-2 text-purple-200">
+          <span
+            className="w-2.5 h-2.5 rounded-full inline-block shadow-sm"
+            style={{ backgroundColor: color }}
+          />
+          <span className="text-zinc-300">{data?.name && data.name !== 'responses' ? `${data.name}: ` : 'Count: '}</span>
+          <span className="font-mono font-bold text-white text-sm">{value}</span>
+          {pct !== undefined && (
+            <span className="font-mono text-purple-300 font-semibold text-[11px]">({pct}%)</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return null;
 };
 
 export const DEFAULT_BANNER_IMAGE = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80';
@@ -114,6 +170,38 @@ const BForms = () => {
   const [responses, setResponses] = useState<BFormResponse[]>([]);
   const [loadingResponses, setLoadingResponses] = useState<boolean>(false);
   const [responsesViewTab, setResponsesViewTab] = useState<'summary' | 'individual'>('summary');
+  const [questionChartModes, setQuestionChartModes] = useState<Record<string, 'donut' | 'bar' | 'progress'>>({});
+
+  // Timeline data calculation for intake velocity area chart
+  const timelineData = useMemo(() => {
+    if (!responses.length) return [];
+    const map: Record<string, { label: string; responses: number; timestamp: number }> = {};
+    responses.forEach((r) => {
+      let dateObj: Date | null = null;
+      if (r.submittedAt?.toDate) {
+        dateObj = r.submittedAt.toDate();
+      } else if (r.submittedAt) {
+        const parsed = new Date(r.submittedAt);
+        if (!isNaN(parsed.getTime())) dateObj = parsed;
+      }
+      const label = dateObj
+        ? dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        : 'Recent';
+      const timestamp = dateObj ? dateObj.getTime() : Date.now();
+      if (!map[label]) {
+        map[label] = { label, responses: 0, timestamp };
+      }
+      map[label].responses += 1;
+    });
+    const points = Object.values(map).sort((a, b) => a.timestamp - b.timestamp);
+    if (points.length === 1) {
+      return [
+        { label: 'Campaign Launch', responses: 0 },
+        { label: points[0].label, responses: points[0].responses }
+      ];
+    }
+    return points;
+  }, [responses]);
 
   // Form Builder state - starts completely fresh
   const [formTitle, setFormTitle] = useState('');
@@ -1589,78 +1677,387 @@ const BForms = () => {
               </div>
             </div>
           ) : responsesViewTab === 'summary' ? (
-            /* Summary Breakdown */
+            /* Summary Breakdown with Rich Charts & Graphs */
             <div className="space-y-6">
-              {activeForm.questions.map((q, idx) => {
-                const qResponses = responses.map(r => r.answers?.[q.id]).filter(v => v !== undefined && v !== '');
-
-                return (
-                  <div key={q.id} className="bg-[#0C0C12]/80 border border-purple-500/30 rounded-2xl p-6 backdrop-blur-xl space-y-4">
-                    <div className="flex items-center justify-between gap-2 border-b border-white/5 pb-3">
-                      <h4 className="text-base font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center font-mono">
-                          {idx + 1}
-                        </span>
-                        {q.title}
-                      </h4>
-                      <span className="text-xs text-purple-300/80 font-mono">
-                        {qResponses.length} answers
+              {/* Submission Velocity / Influx Timeline Graph */}
+              {timelineData.length > 0 && (
+                <div className="p-6 rounded-2xl bg-[#0C0C12]/80 border border-purple-500/30 backdrop-blur-xl relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 border-b border-white/5 pb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        <TrendingUp size={18} className="text-purple-400" />
+                        Submission Velocity & Intake Trend
+                      </h3>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        Active intake tracking responses across timestamp telemetry
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono px-3 py-1.5 rounded-xl bg-purple-500/10 text-purple-300 border border-purple-500/20 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Live Influx
+                      </span>
+                      <span className="text-xs text-zinc-400 font-mono">
+                        <strong className="text-white font-bold">{responses.length}</strong> total {responses.length === 1 ? 'entry' : 'entries'}
                       </span>
                     </div>
+                  </div>
 
-                    {/* Radio / Checkbox Distribution */}
-                    {(q.type === 'radio' || q.type === 'checkbox') && q.options && (
-                      <div className="space-y-3">
-                        {q.options.map((opt) => {
-                          const count = qResponses.filter(ans => {
-                            if (Array.isArray(ans)) return ans.includes(opt);
-                            return ans === opt;
-                          }).length;
-                          const pct = qResponses.length > 0 ? Math.round((count / qResponses.length) * 100) : 0;
+                  <div className="h-52 w-full pt-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="purpleGlow" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.6} />
+                            <stop offset="95%" stopColor="#a855f7" stopOpacity={0.0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#2e1065" opacity={0.35} vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          stroke="#71717a"
+                          fontSize={11}
+                          tickLine={false}
+                          dy={6}
+                        />
+                        <YAxis
+                          stroke="#71717a"
+                          fontSize={11}
+                          allowDecimals={false}
+                          tickLine={false}
+                          dx={-4}
+                        />
+                        <RechartsTooltip content={<GlassmorphicTooltip />} />
+                        <Area
+                          type="monotone"
+                          dataKey="responses"
+                          stroke="#c084fc"
+                          strokeWidth={3}
+                          fillOpacity={1}
+                          fill="url(#purpleGlow)"
+                          dot={{ fill: '#c084fc', r: 4, strokeWidth: 2, stroke: '#1e1b4b' }}
+                          activeDot={{ r: 6, stroke: '#ffffff', strokeWidth: 2, fill: '#a855f7' }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Questions breakdown */}
+              {activeForm.questions.map((q, idx) => {
+                const qResponses = responses.map(r => r.answers?.[q.id]).filter(v => v !== undefined && v !== '');
+                const mode = questionChartModes[q.id] || 'donut';
+
+                return (
+                  <div key={q.id} className="bg-[#0C0C12]/80 border border-purple-500/30 rounded-2xl p-6 backdrop-blur-xl space-y-5">
+                    {/* Question Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                      <h4 className="text-base font-bold text-white flex items-start gap-2.5">
+                        <span className="w-6 h-6 shrink-0 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center font-mono mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <span>{q.title}</span>
+                      </h4>
+
+                      <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                        <span className="text-xs text-purple-300/80 font-mono px-2.5 py-1 bg-purple-500/10 rounded-lg border border-purple-500/20">
+                          {qResponses.length} {qResponses.length === 1 ? 'answer' : 'answers'}
+                        </span>
+
+                        {/* View Switcher for Choice Questions */}
+                        {(q.type === 'radio' || q.type === 'checkbox') && (
+                          <div className="flex items-center bg-[#141224] p-0.5 rounded-xl border border-purple-500/20">
+                            <button
+                              onClick={() => setQuestionChartModes(prev => ({ ...prev, [q.id]: 'donut' }))}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                mode === 'donut'
+                                  ? 'bg-purple-600 text-white shadow-md'
+                                  : 'text-zinc-400 hover:text-white'
+                              }`}
+                              title="Donut Graph View"
+                            >
+                              <PieChartIcon size={13} /> Donut
+                            </button>
+                            <button
+                              onClick={() => setQuestionChartModes(prev => ({ ...prev, [q.id]: 'bar' }))}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                mode === 'bar'
+                                  ? 'bg-purple-600 text-white shadow-md'
+                                  : 'text-zinc-400 hover:text-white'
+                              }`}
+                              title="Bar Chart View"
+                            >
+                              <BarChart2 size={13} /> Bar
+                            </button>
+                            <button
+                              onClick={() => setQuestionChartModes(prev => ({ ...prev, [q.id]: 'progress' }))}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                mode === 'progress'
+                                  ? 'bg-purple-600 text-white shadow-md'
+                                  : 'text-zinc-400 hover:text-white'
+                              }`}
+                              title="List Breakdown View"
+                            >
+                              <List size={13} /> Breakdown
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Star Rating Analytics & Distribution */}
+                    {q.type === 'rating' && (
+                      <div className="space-y-4">
+                        {(() => {
+                          const numericVals = qResponses.map(v => Number(v)).filter(n => !isNaN(n));
+                          const total = numericVals.length;
+                          const avg = total > 0
+                            ? (numericVals.reduce((sum, n) => sum + n, 0) / total).toFixed(1)
+                            : '0.0';
+                          const avgNum = Number(avg);
+
+                          const ratingDistribution = [5, 4, 3, 2, 1].map(stars => {
+                            const count = numericVals.filter(v => Math.round(v) === stars).length;
+                            const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                            return {
+                              stars,
+                              label: `${stars} Star`,
+                              count,
+                              pct,
+                              color: stars >= 4 ? '#eab308' : stars === 3 ? '#3b82f6' : stars === 2 ? '#f97316' : '#f43f5e'
+                            };
+                          });
+
+                          // Rating sentiment pill
+                          let sentiment = { label: 'No Ratings Recorded', bg: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+                          if (total > 0) {
+                            if (avgNum >= 4.5) sentiment = { label: 'Exceptional Delight', bg: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' };
+                            else if (avgNum >= 3.8) sentiment = { label: 'Positive Experience', bg: 'bg-green-500/10 text-green-300 border-green-500/30' };
+                            else if (avgNum >= 2.5) sentiment = { label: 'Moderate / Neutral', bg: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' };
+                            else sentiment = { label: 'Critical Attention Required', bg: 'bg-rose-500/10 text-rose-300 border-rose-500/30' };
+                          }
 
                           return (
-                            <div key={opt} className="space-y-1">
-                              <div className="flex items-center justify-between text-xs font-medium">
-                                <span className="text-zinc-200">{opt}</span>
-                                <span className="text-purple-300 font-mono font-bold">{count} ({pct}%)</span>
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 p-5 bg-[#121020]/90 rounded-2xl border border-purple-500/25">
+                              {/* Left: Score Badge & Sentiment */}
+                              <div className="md:col-span-5 flex flex-col justify-center items-center text-center p-4 bg-[#0A0914] rounded-xl border border-purple-500/20">
+                                <span className="text-5xl font-black text-yellow-400 font-mono tracking-tight drop-shadow-[0_0_20px_rgba(250,204,21,0.3)]">
+                                  {avg}
+                                </span>
+                                <span className="text-[11px] uppercase tracking-wider font-bold text-zinc-400 mt-1">
+                                  Out of 5.0 Stars
+                                </span>
+
+                                {/* Stars */}
+                                <div className="flex items-center gap-1.5 text-yellow-400 my-3">
+                                  {[1, 2, 3, 4, 5].map((star) => (
+                                    <Star
+                                      key={star}
+                                      size={22}
+                                      fill={star <= Math.round(avgNum) ? '#facc15' : 'transparent'}
+                                      className={star <= Math.round(avgNum) ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]' : 'text-zinc-600'}
+                                    />
+                                  ))}
+                                </div>
+
+                                <span className={`text-xs font-bold px-3 py-1 rounded-full border ${sentiment.bg}`}>
+                                  {sentiment.label}
+                                </span>
+                                <span className="text-[11px] text-zinc-500 mt-2 font-mono">
+                                  Based on {total} respondent {total === 1 ? 'rating' : 'ratings'}
+                                </span>
                               </div>
-                              <div className="h-2.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-gradient-to-r from-purple-600 to-purple-500 rounded-full transition-all duration-500"
-                                  style={{ width: `${pct}%` }}
-                                />
+
+                              {/* Right: Distribution Breakdown Histogram */}
+                              <div className="md:col-span-7 flex flex-col justify-center space-y-2.5">
+                                <div className="flex items-center justify-between text-xs font-bold text-zinc-400 mb-1 px-1">
+                                  <span>Rating Distribution</span>
+                                  <span>Percentage Breakdown</span>
+                                </div>
+                                {ratingDistribution.map((r) => (
+                                  <div key={r.stars} className="flex items-center gap-3 text-xs">
+                                    <div className="w-12 font-bold font-mono text-zinc-300 flex items-center gap-1 shrink-0">
+                                      <span>{r.stars}</span>
+                                      <Star size={12} className="text-yellow-400" fill="#facc15" />
+                                    </div>
+                                    <div className="flex-1 h-3 bg-white/5 rounded-full overflow-hidden border border-white/5 relative">
+                                      <div
+                                        className="h-full rounded-full transition-all duration-700"
+                                        style={{
+                                          width: `${r.pct}%`,
+                                          backgroundColor: r.color,
+                                          boxShadow: r.pct > 0 ? `0 0 10px ${r.color}66` : 'none'
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="w-16 text-right font-mono font-bold text-zinc-300 shrink-0">
+                                      <span className="text-white">{r.count}</span>
+                                      <span className="text-[10px] text-zinc-500 ml-1">({r.pct}%)</span>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           );
-                        })}
+                        })()}
                       </div>
                     )}
 
-                    {/* Star Rating Average */}
-                    {q.type === 'rating' && (
-                      <div className="flex items-center gap-6 p-4 bg-[#141224] rounded-xl border border-purple-500/20">
+                    {/* Radio / Checkbox Graphical Visualizations */}
+                    {(q.type === 'radio' || q.type === 'checkbox') && q.options && (
+                      <div>
                         {(() => {
-                          const numericVals = qResponses.map(v => Number(v)).filter(n => !isNaN(n));
-                          const avg = numericVals.length > 0
-                            ? (numericVals.reduce((sum, n) => sum + n, 0) / numericVals.length).toFixed(1)
-                            : '0.0';
+                          const optionData = (q.options || []).map((opt, i) => {
+                            const count = qResponses.filter(ans => {
+                              if (Array.isArray(ans)) return ans.includes(opt);
+                              return ans === opt;
+                            }).length;
+                            const pct = qResponses.length > 0 ? Math.round((count / qResponses.length) * 100) : 0;
+                            return {
+                              name: opt,
+                              shortName: opt.length > 20 ? opt.substring(0, 18) + '...' : opt,
+                              count,
+                              pct,
+                              color: CHART_PALETTE[i % CHART_PALETTE.length]
+                            };
+                          });
+                          const totalVotes = optionData.reduce((acc, cur) => acc + cur.count, 0);
 
+                          // View Mode 1: Donut Chart
+                          if (mode === 'donut') {
+                            return (
+                              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center p-4 bg-[#121020]/60 rounded-2xl border border-purple-500/20">
+                                {/* Donut Chart */}
+                                <div className="lg:col-span-5 h-56 relative flex items-center justify-center">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                      <RechartsTooltip content={<GlassmorphicTooltip />} />
+                                      <Pie
+                                        data={optionData}
+                                        dataKey="count"
+                                        nameKey="name"
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={55}
+                                        outerRadius={82}
+                                        paddingAngle={4}
+                                        stroke="#0c0c14"
+                                        strokeWidth={2}
+                                      >
+                                        {optionData.map((entry, index) => (
+                                          <Cell key={`cell-${index}`} fill={entry.color} />
+                                        ))}
+                                      </Pie>
+                                    </PieChart>
+                                  </ResponsiveContainer>
+                                  {/* Center Metric */}
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                    <span className="text-2xl font-black text-white font-mono">{totalVotes}</span>
+                                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Total Votes</span>
+                                  </div>
+                                </div>
+
+                                {/* Interactive Legend with Progress bars */}
+                                <div className="lg:col-span-7 space-y-2.5">
+                                  {optionData.map((opt) => (
+                                    <div
+                                      key={opt.name}
+                                      className="p-2.5 rounded-xl bg-[#0A0914]/80 border border-white/5 hover:border-purple-500/30 transition-all"
+                                    >
+                                      <div className="flex items-center justify-between text-xs mb-1.5 gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span
+                                            className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                                            style={{ backgroundColor: opt.color }}
+                                          />
+                                          <span className="font-semibold text-zinc-200 truncate">{opt.name}</span>
+                                        </div>
+                                        <span className="font-mono font-bold text-purple-300 shrink-0 text-xs">
+                                          {opt.count} <span className="text-zinc-500 font-normal">({opt.pct}%)</span>
+                                        </span>
+                                      </div>
+                                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full transition-all duration-500"
+                                          style={{
+                                            width: `${opt.pct}%`,
+                                            backgroundColor: opt.color,
+                                            boxShadow: opt.pct > 0 ? `0 0 8px ${opt.color}88` : 'none'
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // View Mode 2: Bar Chart
+                          if (mode === 'bar') {
+                            return (
+                              <div className="p-4 bg-[#121020]/60 rounded-2xl border border-purple-500/20">
+                                <div className="h-64 w-full">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart
+                                      data={optionData}
+                                      margin={{ top: 20, right: 20, left: -15, bottom: 40 }}
+                                    >
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#2e1065" opacity={0.35} vertical={false} />
+                                      <XAxis
+                                        dataKey="shortName"
+                                        stroke="#71717a"
+                                        fontSize={10}
+                                        tickLine={false}
+                                        angle={-20}
+                                        textAnchor="end"
+                                        height={45}
+                                      />
+                                      <YAxis
+                                        stroke="#71717a"
+                                        fontSize={11}
+                                        allowDecimals={false}
+                                        tickLine={false}
+                                      />
+                                      <RechartsTooltip content={<GlassmorphicTooltip />} />
+                                      <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                                        {optionData.map((entry, index) => (
+                                          <Cell key={`cell-bar-${index}`} fill={entry.color} />
+                                        ))}
+                                      </Bar>
+                                    </BarChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // View Mode 3: Detailed Progress Breakdown
                           return (
-                            <>
-                              <div>
-                                <span className="text-4xl font-black text-yellow-400 font-mono">{avg}</span>
-                                <span className="text-xs text-zinc-400 block mt-0.5">Average Score</span>
-                              </div>
-                              <div className="flex items-center gap-1 text-yellow-400">
-                                {[1, 2, 3, 4, 5].map((star) => (
-                                  <Star
-                                    key={star}
-                                    size={24}
-                                    fill={star <= Math.round(Number(avg)) ? 'currentColor' : 'none'}
-                                  />
-                                ))}
-                              </div>
-                            </>
+                            <div className="space-y-3 p-4 bg-[#121020]/60 rounded-2xl border border-purple-500/20">
+                              {optionData.map((opt) => (
+                                <div key={opt.name} className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs font-medium">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: opt.color }} />
+                                      <span className="text-zinc-200">{opt.name}</span>
+                                    </div>
+                                    <span className="text-purple-300 font-mono font-bold">{opt.count} ({opt.pct}%)</span>
+                                  </div>
+                                  <div className="h-2.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full transition-all duration-500"
+                                      style={{
+                                        width: `${opt.pct}%`,
+                                        backgroundColor: opt.color,
+                                        boxShadow: opt.pct > 0 ? `0 0 10px ${opt.color}88` : 'none'
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           );
                         })()}
                       </div>
@@ -1668,12 +2065,28 @@ const BForms = () => {
 
                     {/* Text Responses sample list */}
                     {(q.type === 'short_text' || q.type === 'paragraph') && (
-                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {qResponses.slice(0, 10).map((ans, aIdx) => (
-                          <div key={aIdx} className="p-3 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-300">
-                            "{String(ans)}"
+                      <div className="space-y-2.5">
+                        {qResponses.length === 0 ? (
+                          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 text-center text-xs text-zinc-500">
+                            No text feedback submitted yet for this field.
                           </div>
-                        ))}
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+                            {qResponses.map((ans, aIdx) => (
+                              <div
+                                key={aIdx}
+                                className="p-3.5 rounded-xl bg-[#0A0914] border border-purple-500/20 text-xs text-zinc-200 relative group hover:border-purple-500/40 transition-all flex flex-col justify-between"
+                              >
+                                <div className="flex items-center gap-2 text-[10px] text-purple-400/80 font-mono mb-2 uppercase tracking-wider">
+                                  <MessageSquare size={11} /> Respondent #{aIdx + 1}
+                                </div>
+                                <p className="italic text-zinc-300 leading-relaxed">
+                                  "{String(ans)}"
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
