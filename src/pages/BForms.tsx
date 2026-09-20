@@ -348,7 +348,7 @@ const BForms = () => {
 
   // Copy Form Share Link
   const copyShareLink = (formId: string) => {
-    const url = `${window.location.origin}/b-forms/${formId}`;
+    const url = `${window.location.origin}/${formId}`;
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     toast.success('Link copied to clipboard!', {
@@ -528,7 +528,7 @@ const BForms = () => {
 
               <div className="bg-[#141224] border border-purple-500/40 rounded-xl p-3 flex items-center justify-between gap-2 mb-6">
                 <span className="text-xs text-purple-200 font-mono truncate select-all">
-                  {`${window.location.origin}/b-forms/${shareModalForm.id}`}
+                  {`${window.location.origin}/${shareModalForm.id}`}
                 </span>
                 <button
                   onClick={() => copyShareLink(shareModalForm.id)}
@@ -541,7 +541,7 @@ const BForms = () => {
 
               <div className="flex gap-3">
                 <a
-                  href={`/b-forms/${shareModalForm.id}`}
+                  href={`/${shareModalForm.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 py-3 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 hover:text-white rounded-xl text-center text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2"
@@ -654,7 +654,7 @@ const BForms = () => {
                           <Copy size={13} /> Link
                         </button>
                         <a
-                          href={`/b-forms/${form.id}`}
+                          href={`/${form.id}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg border border-white/10 transition-colors"
