@@ -264,7 +264,14 @@ const BForms = () => {
       },
       (err) => {
         console.error('Failed to listen to forms:', err);
-        // Fallback getDocs
+        setLoadingForms(false);
+        if (err?.code === 'resource-exhausted') {
+          toast.error('Firebase Daily Quota Exceeded (Spark Plan). Upgrade to Blaze in Firebase Console or wait for quota reset.', {
+            duration: 9000
+          });
+          return;
+        }
+        // Fallback getDocs only for non-quota errors
         getDocs(formsRef)
           .then((snap) => {
             const fetched: BForm[] = snap.docs.map((d) => ({
@@ -272,11 +279,9 @@ const BForms = () => {
               ...(d.data() as any)
             }));
             setForms(fetched);
-            setLoadingForms(false);
           })
           .catch((e) => {
             console.error('Fallback getDocs error:', e);
-            setLoadingForms(false);
           });
       }
     );
@@ -549,7 +554,13 @@ const BForms = () => {
       setView('dashboard');
     } catch (err: any) {
       console.error('Error saving form:', err);
-      toast.error(`Failed to save form: ${err.message || 'Please check connection'}`);
+      if (err?.code === 'resource-exhausted') {
+        toast.error('Firebase Daily Quota Exceeded! Daily limit reached for this Firebase project. Upgrade to Blaze in Firebase Console or wait for daily quota reset.', {
+          duration: 10000
+        });
+      } else {
+        toast.error(`Failed to save form: ${err.message || 'Please check connection'}`);
+      }
       setSavingForm(false);
     }
   };
