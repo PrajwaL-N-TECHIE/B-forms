@@ -31,7 +31,8 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { toast } from 'sonner';
 import {
   BForm, BFormQuestion, BFormResponse,
-  downloadFormResponsesCSV, downloadFormResponsesPDF
+  downloadFormResponsesCSV, downloadFormResponsesPDF,
+  cleanFirestorePayload, sanitizeFormQuestion
 } from '@/utils/bformReports';
 
 export const OFFICIAL_FEEDBACK_FORM_ID = 'bforms-feedback';
@@ -379,8 +380,8 @@ const BForms = () => {
       title: 'Untitled Question',
       type: type,
       required: false,
-      options: type === 'radio' || type === 'checkbox' ? ['Option 1', 'Option 2'] : undefined,
-      ratingMax: type === 'rating' ? 5 : undefined
+      ...(type === 'radio' || type === 'checkbox' ? { options: ['Option 1', 'Option 2'] } : {}),
+      ...(type === 'rating' ? { ratingMax: 5 } : {})
     };
     setQuestions([...questions, newQ]);
   };
@@ -407,10 +408,12 @@ const BForms = () => {
   const duplicateQuestion = (index: number) => {
     const source = questions[index];
     const clone: BFormQuestion = {
-      ...source,
       id: `q_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      title: `${source.title} (Copy)`,
-      options: source.options ? [...source.options] : undefined
+      title: `${source.title || 'Question'} (Copy)`,
+      type: source.type,
+      required: Boolean(source.required),
+      ...(source.options ? { options: [...source.options] } : {}),
+      ...(source.ratingMax ? { ratingMax: source.ratingMax } : {})
     };
     const nextList = [...questions];
     nextList.splice(index + 1, 0, clone);
@@ -507,21 +510,27 @@ const BForms = () => {
     const existingForm = forms.find(f => f.id === formId);
     const currentResponseCount = existingForm?.responseCount ?? activeForm?.responseCount ?? 0;
 
+    const sanitizedQuestions = questions.map((q, idx) => sanitizeFormQuestion(q, idx));
+
     const newForm: BForm = {
       id: formId,
       title: formTitle.trim(),
-      description: formDescription.trim(),
+      description: (formDescription || '').trim(),
       coverImage: coverImage || '',
-      questions: questions,
+      questions: sanitizedQuestions,
       responseCount: currentResponseCount,
       status: 'active'
     };
 
     try {
-      await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), {
+      const payload = cleanFirestorePayload({
         ...newForm,
-        ...(editingFormId ? { updatedAt: serverTimestamp() } : { createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
-      }, { merge: true });
+        ...(editingFormId
+          ? { updatedAt: serverTimestamp() }
+          : { createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+      });
+
+      await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), payload, { merge: true });
 
       const publishedUrl = getPublicFormUrl(formId);
       fallbackCopyText(publishedUrl);
@@ -1192,11 +1201,20 @@ const BForms = () => {
                       value={q.type}
                       onChange={(e) => {
                         const newType = e.target.value as BFormQuestion['type'];
-                        updateQuestion(q.id, {
-                          type: newType,
-                          options: newType === 'radio' || newType === 'checkbox' ? (q.options || ['Option 1', 'Option 2']) : undefined,
-                          ratingMax: newType === 'rating' ? 5 : undefined
-                        });
+                        setQuestions(prev => prev.map(item => {
+                          if (item.id !== q.id) return item;
+                          const nextQ: BFormQuestion = {
+                            id: item.id,
+                            title: item.title,
+                            type: newType,
+                            required: Boolean(item.required),
+                            ...(newType === 'radio' || newType === 'checkbox'
+                              ? { options: (item.options && item.options.length > 0 ? item.options : ['Option 1', 'Option 2']) }
+                              : {}),
+                            ...(newType === 'rating' ? { ratingMax: item.ratingMax || 5 } : {})
+                          };
+                          return nextQ;
+                        }));
                       }}
                       className="w-full bg-[#161424] border border-purple-500/40 rounded-xl px-3 py-2 text-xs font-bold text-purple-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                     >
