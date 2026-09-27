@@ -6,8 +6,10 @@ import {
   CircleDot, AlignLeft, Type, BarChart3, Users, Clock, Shield,
   Eye, EyeOff, Save, Layers, RefreshCw, X, AlertCircle, LogOut, MessageSquare,
   Edit, ChevronUp, ChevronDown, ArrowRight, Upload,
-  TrendingUp, Activity, PieChart as PieChartIcon, BarChart2, List
+  TrendingUp, Activity, PieChart as PieChartIcon, BarChart2, List, Database
 } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { SUPABASE_SCHEMA_SQL } from '@/utils/supabaseSql';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -223,6 +225,10 @@ const BForms = () => {
   const [shareModalForm, setShareModalForm] = useState<BForm | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
+  // Supabase Setup Modal state
+  const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
+  const [copiedSql, setCopiedSql] = useState<boolean>(false);
+
   // Check existing auth on mount
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
@@ -233,11 +239,61 @@ const BForms = () => {
     return () => unsub();
   }, []);
 
-  // Fetch all forms from Firestore
+  // Fetch all forms from Supabase (or Firestore fallback)
   useEffect(() => {
     if (!isAuthenticated) return;
     setLoadingForms(true);
 
+    if (isSupabaseConfigured) {
+      const fetchSupabaseForms = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('forms')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+
+          const mapped: BForm[] = (data || []).map((row: any) => ({
+            id: row.id,
+            title: row.title || 'Untitled Form',
+            description: row.description || '',
+            coverImage: row.cover_image || '',
+            questions: row.questions || [],
+            createdAt: row.created_at ? new Date(row.created_at) : new Date(),
+            updatedAt: row.updated_at ? new Date(row.updated_at) : new Date(),
+            responseCount: row.response_count || 0,
+            status: row.status || 'active'
+          }));
+
+          setForms(mapped);
+          setLoadingForms(false);
+        } catch (err: any) {
+          console.error('Supabase fetch forms error:', err);
+          toast.error(`Supabase error: ${err.message || 'Failed to load forms'}`);
+          setLoadingForms(false);
+        }
+      };
+
+      fetchSupabaseForms();
+
+      const channel = supabase
+        .channel('public_forms_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'forms' },
+          () => {
+            fetchSupabaseForms();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+
+    // Fallback: Firestore
     const formsRef = collection(db, 'buiz_rooms', '_bforms_', 'forms');
     const q = query(formsRef, orderBy('createdAt', 'desc'));
 
@@ -266,7 +322,7 @@ const BForms = () => {
         console.error('Failed to listen to forms:', err);
         setLoadingForms(false);
         if (err?.code === 'resource-exhausted') {
-          toast.error('Firebase Daily Quota Exceeded (Spark Plan). Upgrade to Blaze in Firebase Console or wait for quota reset.', {
+          toast.error('Firebase Daily Quota Exceeded (Spark Plan). Upgrade to Supabase PostgreSQL for unlimited quota!', {
             duration: 9000
           });
           return;
@@ -294,6 +350,53 @@ const BForms = () => {
     if (!activeForm || view !== 'responses') return;
     setLoadingResponses(true);
 
+    if (isSupabaseConfigured) {
+      const fetchSupabaseResponses = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('form_responses')
+            .select('*')
+            .eq('form_id', activeForm.id)
+            .order('submitted_at', { ascending: false });
+
+          if (error) throw error;
+
+          const list: BFormResponse[] = (data || []).map((row: any) => ({
+            id: row.id,
+            formId: row.form_id,
+            answers: row.answers || {},
+            respondentName: row.respondent_name || 'Anonymous',
+            respondentEmail: row.respondent_email || '',
+            submittedAt: row.submitted_at ? new Date(row.submitted_at) : new Date()
+          }));
+
+          setResponses(list);
+          setLoadingResponses(false);
+        } catch (err: any) {
+          console.error('Failed to fetch responses from Supabase:', err);
+          setLoadingResponses(false);
+        }
+      };
+
+      fetchSupabaseResponses();
+
+      const channel = supabase
+        .channel(`responses_realtime_${activeForm.id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'form_responses', filter: `form_id=eq.${activeForm.id}` },
+          () => {
+            fetchSupabaseResponses();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+
+    // Fallback: Firestore
     const responsesRef = collection(db, 'buiz_rooms', '_bforms_responses_', 'responses');
     const q = query(responsesRef, where('formId', '==', activeForm.id));
 
@@ -528,14 +631,33 @@ const BForms = () => {
     };
 
     try {
-      const payload = cleanFirestorePayload({
-        ...newForm,
-        ...(editingFormId
-          ? { updatedAt: serverTimestamp() }
-          : { createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
-      });
+      if (isSupabaseConfigured) {
+        const payload = {
+          id: formId,
+          title: formTitle.trim(),
+          description: (formDescription || '').trim(),
+          cover_image: coverImage || '',
+          questions: sanitizedQuestions,
+          response_count: currentResponseCount,
+          status: 'active',
+          updated_at: new Date().toISOString()
+        };
 
-      await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), payload, { merge: true });
+        const { error: sbErr } = await supabase
+          .from('forms')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (sbErr) throw sbErr;
+      } else {
+        const payload = cleanFirestorePayload({
+          ...newForm,
+          ...(editingFormId
+            ? { updatedAt: serverTimestamp() }
+            : { createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+        });
+
+        await setDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId), payload, { merge: true });
+      }
 
       const publishedUrl = getPublicFormUrl(formId);
       fallbackCopyText(publishedUrl);
@@ -555,7 +677,7 @@ const BForms = () => {
     } catch (err: any) {
       console.error('Error saving form:', err);
       if (err?.code === 'resource-exhausted') {
-        toast.error('Firebase Daily Quota Exceeded! Daily limit reached for this Firebase project. Upgrade to Blaze in Firebase Console or wait for daily quota reset.', {
+        toast.error('Firebase Daily Quota Exceeded! Daily limit reached for this Firebase project. Connect Supabase in 2 minutes for unlimited usage!', {
           duration: 10000
         });
       } else {
@@ -573,20 +695,25 @@ const BForms = () => {
       return;
     }
     try {
-      await deleteDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId));
-      
-      // Clean up responses associated with this form
-      try {
-        const respQuery = query(
-          collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
-          where('formId', '==', formId)
-        );
-        const respSnap = await getDocs(respQuery);
-        respSnap.forEach(d => {
-          deleteDoc(d.ref).catch(() => {});
-        });
-      } catch (cleanErr) {
-        console.warn('Could not batch delete responses:', cleanErr);
+      if (isSupabaseConfigured) {
+        const { error: delErr } = await supabase.from('forms').delete().eq('id', formId);
+        if (delErr) throw delErr;
+      } else {
+        await deleteDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', formId));
+        
+        // Clean up responses associated with this form
+        try {
+          const respQuery = query(
+            collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
+            where('formId', '==', formId)
+          );
+          const respSnap = await getDocs(respQuery);
+          respSnap.forEach(d => {
+            deleteDoc(d.ref).catch(() => {});
+          });
+        } catch (cleanErr) {
+          console.warn('Could not batch delete responses:', cleanErr);
+        }
       }
 
       toast.success('Form deleted successfully.');
@@ -609,15 +736,35 @@ const BForms = () => {
   const handleQuickDownload = async (form: BForm, format: 'csv' | 'pdf') => {
     toast.info(`Preparing ${format.toUpperCase()} export for "${form.title}"...`);
     try {
-      const q = query(
-        collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
-        where('formId', '==', form.id)
-      );
-      const snap = await getDocs(q);
-      const list: BFormResponse[] = snap.docs.map(d => ({
-        id: d.id,
-        ...(d.data() as any)
-      }));
+      let list: BFormResponse[] = [];
+      if (isSupabaseConfigured) {
+        const { data, error } = await supabase
+          .from('form_responses')
+          .select('*')
+          .eq('form_id', form.id)
+          .order('submitted_at', { ascending: false });
+
+        if (error) throw error;
+        list = (data || []).map((row: any) => ({
+          id: row.id,
+          formId: row.form_id,
+          answers: row.answers || {},
+          respondentName: row.respondent_name || 'Anonymous',
+          respondentEmail: row.respondent_email || '',
+          submittedAt: row.submitted_at ? new Date(row.submitted_at) : new Date()
+        }));
+      } else {
+        const q = query(
+          collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'),
+          where('formId', '==', form.id)
+        );
+        const snap = await getDocs(q);
+        list = snap.docs.map(d => ({
+          id: d.id,
+          ...(d.data() as any)
+        }));
+      }
+
       if (list.length === 0) {
         toast.warning(`No responses submitted yet for "${form.title}".`);
         return;
@@ -774,6 +921,25 @@ const BForms = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Supabase Database Connection Badge */}
+          {isSupabaseConfigured ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+              <Database size={13} className="text-emerald-400" />
+              <span className="hidden sm:inline">DB: Supabase (Postgres)</span>
+              <span className="sm:hidden">Supabase</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowSupabaseModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold transition-all cursor-pointer"
+              title="Click to connect Supabase and remove Firestore quota limits"
+            >
+              <Database size={13} className="text-amber-400 animate-pulse" />
+              <span className="hidden sm:inline">Connect Supabase</span>
+              <span className="sm:hidden">DB Setup</span>
+            </button>
+          )}
+
           {view !== 'dashboard' && (
             <button
               onClick={() => setView('dashboard')}
@@ -803,6 +969,83 @@ const BForms = () => {
           </button>
         </div>
       </header>
+
+      {/* SUPABASE SETUP MODAL */}
+      <AnimatePresence>
+        {showSupabaseModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#0C0C12] border border-purple-500/40 rounded-3xl p-6 sm:p-8 max-w-xl w-full relative shadow-[0_0_50px_rgba(168,85,247,0.3)] max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => setShowSupabaseModal(false)}
+                className="absolute top-5 right-5 p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-white/10"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mb-4 text-emerald-400">
+                <Database size={24} />
+              </div>
+
+              <h3 className="text-xl font-bold text-white mb-1">Migrate Database to Supabase</h3>
+              <p className="text-xs sm:text-sm text-zinc-400 mb-5">
+                Supabase gives you 500MB free PostgreSQL database, unlimited read/write requests, and instant realtime updates with zero Firebase quota restrictions.
+              </p>
+
+              <div className="space-y-4 mb-6">
+                <div className="p-3.5 rounded-2xl bg-[#141224] border border-purple-500/20 text-xs text-zinc-300">
+                  <div className="font-bold text-white mb-1">Step 1: Create Supabase Project</div>
+                  <p className="text-zinc-400">Go to <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-purple-400 underline">supabase.com</a>, create a free organization & new project.</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-[#141224] border border-purple-500/20 text-xs text-zinc-300">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-bold text-white">Step 2: Run SQL Schema</span>
+                    <button
+                      onClick={() => {
+                        fallbackCopyText(SUPABASE_SCHEMA_SQL);
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                          navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL).catch(() => {});
+                        }
+                        setCopiedSql(true);
+                        toast.success('Supabase SQL Schema copied to clipboard!');
+                        setTimeout(() => setCopiedSql(false), 3000);
+                      }}
+                      className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all"
+                    >
+                      {copiedSql ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedSql ? 'Copied SQL!' : 'Copy SQL Schema'}
+                    </button>
+                  </div>
+                  <p className="text-zinc-400">In Supabase Dashboard, open <strong>SQL Editor</strong> &rarr; click <strong>New Query</strong>, paste the schema, and click <strong>Run</strong>.</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-[#141224] border border-purple-500/20 text-xs text-zinc-300">
+                  <div className="font-bold text-white mb-1">Step 3: Add to .env</div>
+                  <p className="text-zinc-400 mb-2">In Supabase Dashboard &rarr; <strong>Project Settings &rarr; API</strong>, copy your Project URL and anon public key, then add them to your <code>.env</code> file:</p>
+                  <pre className="p-2.5 rounded-xl bg-black/60 font-mono text-[11px] text-purple-300 overflow-x-auto select-all">
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+                  </pre>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowSupabaseModal(false)}
+                  className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs sm:text-sm font-bold transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* SHARE MODAL */}
       <AnimatePresence>

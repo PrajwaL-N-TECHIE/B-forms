@@ -6,6 +6,7 @@ import {
   ArrowRight, ShieldCheck, RefreshCw, User, Mail, HelpCircle
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   doc, getDoc, addDoc, collection, serverTimestamp, updateDoc, increment
 } from 'firebase/firestore';
@@ -43,6 +44,43 @@ const BFormView = () => {
 
     const fetchForm = async () => {
       try {
+        if (isSupabaseConfigured) {
+          const { data, error: sbError } = await supabase
+            .from('forms')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+
+          if (sbError) {
+            console.error('Supabase fetch form error:', sbError);
+            throw sbError;
+          }
+
+          if (!data) {
+            if (id === OFFICIAL_FEEDBACK_FORM_ID) {
+              setForm(OFFICIAL_FEEDBACK_FORM);
+              setLoading(false);
+              return;
+            }
+            setError('Form Not Found. This form may have been deleted or the link is invalid.');
+            setLoading(false);
+            return;
+          }
+
+          setForm({
+            id: data.id,
+            title: data.title || 'Untitled Feedback Form',
+            description: data.description || '',
+            coverImage: data.cover_image || '',
+            questions: data.questions || [],
+            status: data.status || 'active',
+            responseCount: data.response_count || 0
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Fallback: Firestore
         const docRef = doc(db, 'buiz_rooms', '_bforms_', 'forms', id);
         const docSnap = await getDoc(docRef);
 
@@ -145,23 +183,47 @@ const BFormView = () => {
     setSubmitting(true);
 
     try {
-      // 1. Record response in Firestore
-      const cleanAnswers = cleanFirestorePayload(answers);
-      await addDoc(collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'), {
-        formId: form.id,
-        submittedAt: serverTimestamp(),
-        answers: cleanAnswers,
-        respondentName: respondentName.trim() || 'Anonymous',
-        respondentEmail: respondentEmail.trim() || ''
-      });
-
-      // 2. Increment response counter in parent form
-      try {
-        await updateDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', form.id), {
-          responseCount: increment(1)
+      if (isSupabaseConfigured) {
+        // 1. Record response in Supabase
+        const responseId = `res_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        const { error: insertErr } = await supabase.from('form_responses').insert({
+          id: responseId,
+          form_id: form.id,
+          answers: answers,
+          respondent_name: respondentName.trim() || 'Anonymous',
+          respondent_email: respondentEmail.trim() || '',
+          submitted_at: new Date().toISOString()
         });
-      } catch (countErr) {
-        console.warn('Could not increment response counter:', countErr);
+
+        if (insertErr) throw insertErr;
+
+        // 2. Increment response counter in parent form
+        try {
+          await supabase.rpc('increment_form_response_count', { form_id_param: form.id });
+        } catch (rpcErr) {
+          console.warn('RPC increment warning, manual fallback:', rpcErr);
+          const currentCount = form.responseCount || 0;
+          await supabase.from('forms').update({ response_count: currentCount + 1 }).eq('id', form.id);
+        }
+      } else {
+        // 1. Record response in Firestore
+        const cleanAnswers = cleanFirestorePayload(answers);
+        await addDoc(collection(db, 'buiz_rooms', '_bforms_responses_', 'responses'), {
+          formId: form.id,
+          submittedAt: serverTimestamp(),
+          answers: cleanAnswers,
+          respondentName: respondentName.trim() || 'Anonymous',
+          respondentEmail: respondentEmail.trim() || ''
+        });
+
+        // 2. Increment response counter in parent form
+        try {
+          await updateDoc(doc(db, 'buiz_rooms', '_bforms_', 'forms', form.id), {
+            responseCount: increment(1)
+          });
+        } catch (countErr) {
+          console.warn('Could not increment response counter:', countErr);
+        }
       }
 
       // 3. Trigger celebration confetti
