@@ -1,4 +1,4 @@
-# B-Forms • Google Forms Clone & Feedback Engine
+# B-Forms • Dynamic Form & Survey Engine
 
 A lightweight, mobile-optimized, real-time survey and feedback application built with React, Vite, Tailwind CSS, and Firebase Firestore. Engineered with Buildicy's signature dark purple aesthetic.
 

@@ -2,7 +2,7 @@
   "name": "b-forms",
   "private": true,
   "version": "1.0.0",
-  "description": "B-Forms • Google Forms Clone & Feedback Engine by Buildicy",
+  "description": "B-Forms • Dynamic Form & Survey Engine by Buildicy",
   "type": "module",
   "scripts": {
     "dev": "vite",
